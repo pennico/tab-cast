@@ -90,7 +90,7 @@ repo_url: $REPO_URL
 repo_name: Tab Cast
 repo_icon: tab-cast.png
 repo_description: >-
-  Private repository for Tab Cast TV (the browser on the TV). Signed APKs only.
+  Tab Cast TV, the browser on the TV for Tab Cast. Source: https://github.com/pennico/tab-cast
 archive_older: 3
 archive_url: ${REPO_URL%/repo}/archive
 archive_name: Tab Cast archive
