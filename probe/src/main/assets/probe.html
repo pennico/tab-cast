@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tab Cast probe page</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #101418; color: #e8eaed; font: 16px sans-serif; }
+  #clock { position: absolute; left: 2vw; top: 1vh; font: bold 10vh monospace; letter-spacing: .02em; }
+  #label { position: absolute; right: 2vw; top: 3vh; font: 3vh sans-serif; color: #9aa0a6; text-align: right; }
+  #bar { position: absolute; left: 0; top: 14vh; height: 2.5vh; width: 8vw; background: #f44336;
+         animation: mv 2s linear infinite; }
+  @keyframes mv { from { transform: translateX(0) } to { transform: translateX(92vw) } }
+  video { position: absolute; left: 2vw; top: 20vh; width: 62vw; aspect-ratio: 16 / 9; background: #000; }
+  canvas { position: absolute; right: 2vw; top: 20vh; width: 30vw; height: 30vw; }
+  #info { position: absolute; left: 2vw; bottom: 2vh; font: 2.2vh monospace; color: #9aa0a6; white-space: pre; }
+</style>
+</head>
+<body>
+<div id="clock">00.000</div>
+<div id="label">Tab Cast probe</div>
+<div id="bar"></div>
+<video id="v" playsinline autoplay muted loop preload="auto"></video>
+<canvas id="c" width="240" height="240"></canvas>
+<div id="info"></div>
+<script>
+  // Test page for the probe: a running clock (also the stopwatch for the glass-to-glass delay later), a moving bar
+  // (CSS animation), a 2D canvas animation and a playing video. The app reads where things are via `probe.state`.
+  'use strict';
+  const SOURCES = [
+    'https://archive.org/download/BigBuckBunny_124/Content/big_buck_bunny_720p_surround.mp4',
+    'https://archive.org/download/ElephantsDream/ed_1024_512kb.mp4',
+  ];
+  const params = new URLSearchParams(location.search);
+  if (params.get('label')) document.getElementById('label').textContent = params.get('label');
+  const v = document.getElementById('v'), clock = document.getElementById('clock'), info = document.getElementById('info');
+  const ctx = document.getElementById('c').getContext('2d');
+  let src = 0, errors = [];
+  function load() { v.src = SOURCES[src]; v.play().catch(e => errors.push('play: ' + e.name)); }
+  v.addEventListener('error', () => {
+    errors.push('video error ' + (v.error && v.error.code) + ' on ' + SOURCES[src]);
+    if (++src < SOURCES.length) load();
+  });
+  load();
+  window.probeMute = m => { v.muted = m; v.volume = 1; v.play().catch(e => errors.push('play: ' + e.name)); };
+  // A 440 Hz tone through Web Audio: a sound source that doesn't depend on the video's audio codec.
+  let tone = null;
+  window.probeTone = on => {
+    if (on && !tone) {
+      const ac = new AudioContext(), o = ac.createOscillator(), g = ac.createGain();
+      g.gain.value = 0.3; o.frequency.value = 440; o.connect(g).connect(ac.destination); o.start();
+      ac.resume().catch(e => errors.push('audio: ' + e.name));
+      tone = ac;
+    } else if (!on && tone) { tone.close(); tone = null; }
+    return tone ? tone.state : 'off';
+  };
+
+  let frames = 0, fps = 0, last = performance.now();
+  function tick(t) {
+    frames++;
+    if (t - last >= 1000) { fps = Math.round(frames * 10000 / (t - last)) / 10; frames = 0; last = t; }
+    const ms = Date.now() % 100000;
+    clock.textContent = String(Math.floor(ms / 1000)).padStart(2, '0') + '.' + String(ms % 1000).padStart(3, '0');
+    const a = t / 600;
+    ctx.fillStyle = '#202830'; ctx.fillRect(0, 0, 240, 240);
+    ctx.save(); ctx.translate(120, 120); ctx.rotate(a);
+    ctx.fillStyle = 'hsl(' + Math.floor(t / 20) % 360 + ',80%,55%)'; ctx.fillRect(-70, -70, 140, 140);
+    ctx.restore();
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+
+  function rect(e) { const r = e.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width, h: r.height }; }
+  setInterval(() => {
+    const s = {
+      dpr: devicePixelRatio, vw: innerWidth, vh: innerHeight, fps,
+      video: Object.assign(rect(v), { t: v.currentTime, paused: v.paused, muted: v.muted, ready: v.readyState,
+        src: v.currentSrc, w0: v.videoWidth, h0: v.videoHeight, audioBytes: v.webkitAudioDecodedByteCount }),
+      clock: rect(clock), errors: errors.slice(-5),
+    };
+    info.textContent = 'page ' + fps + ' fps · video ' + v.currentTime.toFixed(1) + ' s' + (v.paused ? ' (paused)' : '') +
+      (v.muted ? ' muted' : ' sound') + ' · ' + innerWidth + 'x' + innerHeight + ' @' + devicePixelRatio;
+    if (window.probe) window.probe.state(JSON.stringify(s));
+  }, 500);
+</script>
+</body>
+</html>

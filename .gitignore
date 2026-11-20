@@ -1,0 +1,17 @@
+.gradle/
+build/
+app/build/
+local.properties
+*.iml
+.idea/
+dist/
+jstest/node_modules/
+jstest/.libs/
+jstest/out/
+captures/
+.kotlin/
+probe/build/
+probe/.cxx/
+native/build/
+native/third_party/
+private/

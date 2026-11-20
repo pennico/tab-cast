@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- 0.4.0 "Cast a file": list the tablet's videos (all, or on Android 14 only those picked in "Select videos"). -->
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <!-- 0.5.0 "Mirror screen": screen capture service, the sound apps play (AudioPlaybackCapture, never the mic), and
+         optionally "display over other apps" for a 1-pixel window that keeps the screen on at minimum brightness. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- Optional, never asked for in the app: given by adb (appops) it lets Tab Cast find a subtitle file next to a film. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+
+    <application
+        android:name=".TabCastApp"
+        android:label="Tab Cast"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.TabCast"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:largeHeap="true"
+        android:allowBackup="false">
+
+        <activity
+            android:name=".ui.BrowserActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- Lets the user pick Tab Cast for "Open with" on web links. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+        </activity>
+
+        <!-- Share menu: "Cast to TV" (yt-dlp first, then the browser). -->
+        <activity
+            android:name=".ui.ShareActivity"
+            android:exported="true"
+            android:label="Cast to TV"
+            android:theme="@style/Theme.TabCast.Dialog"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:taskAffinity="">
+            <!-- singleInstance: always alone in its own task, so every new share reaches onNewIntent (see the class doc). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+                <data android:mimeType="video/*" />
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="application/x-mpegurl" />
+                <data android:mimeType="application/vnd.apple.mpegurl" />
+                <data android:mimeType="application/dash+xml" />
+            </intent-filter>
+        </activity>
+
+        <!-- Share menu: "Open in Tab Cast" (straight to the browser, to catch the video there). -->
+        <activity-alias
+            android:name=".OpenInBrowser"
+            android:targetActivity=".ui.ShareActivity"
+            android:exported="true"
+            android:label="Open in Tab Cast">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Share menu: "Open on TV" (the page opens in Tab Cast TV, the browser app on the TV). -->
+        <activity-alias
+            android:name=".OpenOnTv"
+            android:targetActivity=".ui.ShareActivity"
+            android:exported="true"
+            android:label="Open on TV">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- 0.4.0: Share (or Open with) a video from VLC, Files, Gallery: "Cast to TV" plays the file on Tab Cast TV. -->
+        <activity
+            android:name=".ui.FileShareActivity"
+            android:exported="true"
+            android:label="Cast to TV"
+            android:theme="@style/Theme.TabCast.Dialog"
+            android:launchMode="singleInstance"
+            android:excludeFromRecents="true"
+            android:taskAffinity="">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:scheme="file" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
+        <activity android:name=".ui.FilesActivity" android:exported="false" android:label="Cast a file" />
+        <activity android:name=".ui.MirrorActivity" android:exported="false" android:label="Mirror screen"
+            android:theme="@style/Theme.TabCast.Dialog" android:excludeFromRecents="true" />
+
+        <activity android:name=".ui.RemoteActivity" android:exported="false" android:launchMode="singleTop" android:label="Remote" />
+        <activity android:name=".ui.TvRemoteActivity" android:exported="false" android:launchMode="singleTop" android:label="TV browser" />
+        <activity android:name=".ui.DevicesActivity" android:exported="false" android:label="TVs" />
+        <activity android:name=".ui.SettingsActivity" android:exported="false" android:label="Settings" />
+        <activity android:name=".ui.RulesActivity" android:exported="false" android:label="Site rules" android:windowSoftInputMode="adjustResize" />
+        <activity android:name=".ui.LogActivity" android:exported="false" android:label="Log" />
+
+        <service
+            android:name=".mirror.MirrorService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
+        <service
+            android:name=".cast.CastService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
+    </application>
+</manifest>

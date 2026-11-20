@@ -1,0 +1,7 @@
+{
+  "_comment": "Recordings whose top Cast-list candidate must probe OK (CatchReplayTest). Vimeo is expected to need yt-dlp.",
+  "archive": true,
+  "hlsjs": true,
+  "peertube": true,
+  "mp4page": true
+}

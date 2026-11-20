@@ -1,0 +1,7 @@
+# name|url|licence[|download]  (shipped as <name>.txt, plain: the APK build strips a .gz suffix; updated weekly by the
+# apps on Wi-Fi). "download": not shipped in the APK, only fetched by the apps (no clear licence for bundling).
+easylist|https://easylist.to/easylist/easylist.txt|EasyList authors, GPLv3 / CC BY-SA 3.0
+easyprivacy|https://easylist.to/easylist/easyprivacy.txt|EasyList authors, GPLv3 / CC BY-SA 3.0
+ubo-filters|https://ublockorigin.github.io/uAssets/filters/filters.txt|uBlock Origin (uAssets), GPLv3
+ubo-privacy|https://ublockorigin.github.io/uAssets/filters/privacy.txt|uBlock Origin (uAssets), GPLv3
+peterlowe|https://pgl.yoyo.org/adservers/serverlist.php?hostformat=adblockplus&showintro=1&mimetype=plaintext|Peter Lowe's ad and tracking server list (no stated licence; fetched by the app, not shipped)|download

@@ -1,0 +1,6 @@
+{
+  "name": "tab-cast-jstest",
+  "private": true,
+  "description": "Replays real pages in headless Chromium with assets/inject.js to test catching (see README.md)",
+  "dependencies": { "playwright": "1.64.1" }
+}

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Silenced on purpose (same reasons as app/lint.xml): pinned versions, target 34 like the app, ARM-only tablet. -->
+<lint>
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="OldTargetApi" severity="ignore" />
+    <issue id="ChromeOsAbiSupport" severity="ignore" />
+    <issue id="DataExtractionRules" severity="ignore" />
+    <issue id="SetTextI18n" severity="ignore" />
+</lint>

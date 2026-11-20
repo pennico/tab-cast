@@ -1,0 +1,502 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tab Cast TV</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="TV remote">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#101820">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<style>
+  :root {
+    --bg: #f4f6f8; --panel: #ffffff; --text: #17212b; --muted: #5f6b76; --line: #d9dee3;
+    --accent: #0b74c4; --accent-text: #ffffff; --warn-bg: #fff4d6; --warn-text: #6b4b00; --danger: #c62828;
+    --shadow: 0 1px 2px rgba(0,0,0,.06), 0 4px 14px rgba(0,0,0,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d141b; --panel: #16212b; --text: #e7edf2; --muted: #93a2b0; --line: #26343f;
+      --accent: #4fc3f7; --accent-text: #08131b; --warn-bg: #3a2e0c; --warn-text: #ffe08a; --danger: #ef7a7a;
+      --shadow: none;
+    }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  body { padding: env(safe-area-inset-top) 0 calc(env(safe-area-inset-bottom) + 24px); }
+  main { max-width: 760px; margin: 0 auto; padding: 12px 16px; }
+  header { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin: 6px 0 10px; }
+  h1 { font-size: 20px; margin: 0; }
+  h2 { font-size: 15px; margin: 18px 0 8px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 14px; box-shadow: var(--shadow); margin-bottom: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .wrap { flex-wrap: wrap; }
+  .grow { flex: 1; min-width: 0; }
+  button, select, input { font: inherit; color: inherit; }
+  button { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 11px 14px; min-height: 46px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
+  button.icon { min-width: 72px; font-size: 16px; font-weight: 600; display: inline-flex; align-items: center; justify-content: center; }
+  button.icon svg { width: 24px; height: 24px; fill: currentColor; }
+  button:active { transform: scale(.98); }
+  button:disabled { opacity: .45; }
+  input[type=text], input[type=url], input[inputmode], select { width: 100%; border: 1px solid var(--line); background: var(--bg); border-radius: 12px; padding: 11px 12px; min-height: 46px; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .title { font-weight: 600; font-size: 17px; overflow-wrap: anywhere; }
+  .url { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pic { position: relative; background: #000; border-radius: 12px; overflow: hidden; aspect-ratio: 16 / 9; touch-action: none; user-select: none; -webkit-user-select: none; }
+  .pic img { width: 100%; height: 100%; object-fit: fill; display: block; pointer-events: none; }
+  .pic .note { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: #e7edf2; padding: 16px; font-size: 15px; }
+  .controls { display: flex; justify-content: center; gap: 10px; margin: 10px 0; }
+  .seek { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; font-size: 14px; }
+  .seek input { flex: 1; accent-color: var(--accent); }
+  .banner { background: var(--warn-bg); color: var(--warn-text); border-radius: 12px; padding: 12px; margin: 10px 0; }
+  .banner button { margin-top: 8px; }
+  .hidden { display: none !important; }
+  ul.list { list-style: none; padding: 0; margin: 0; }
+  ul.list li { border-top: 1px solid var(--line); padding: 10px 2px; display: flex; gap: 8px; align-items: center; }
+  ul.list li:first-child { border-top: 0; }
+  a { color: var(--accent); }
+  details summary { cursor: pointer; padding: 6px 0; font-weight: 600; }
+  code, .token { font-family: ui-monospace, Menlo, monospace; font-size: 13px; word-break: break-all; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: block; }
+  .pin { font-size: 28px; letter-spacing: .3em; text-align: center; }
+  .error { color: var(--danger); }
+  .ok { color: var(--accent); }
+  .big { width: 100%; min-height: 58px; font-size: 18px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+  .tile { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; min-height: 56px; }
+  .tile .av { flex: none; width: 34px; height: 34px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; }
+  .tile .tt { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+  .recent button { width: 100%; text-align: left; border: 0; background: none; padding: 8px 2px; min-height: 44px; }
+  .recent .host { color: var(--muted); font-size: 13px; }
+  @media (min-width: 900px) { main { max-width: 900px; } .pic { max-width: 640px; margin: 0 auto; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="tvName">Tab Cast TV</h1>
+    <span id="conn" class="muted"></span>
+  </header>
+
+  <!-- Pairing: nothing works before this device is paired with the TV -->
+  <section id="pair" class="hidden">
+    <div class="card">
+      <div class="title">Type the code shown on the TV</div>
+      <p id="pairMsg" class="muted">Asking the TV for a code…</p>
+      <input id="pinInput" class="pin" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000 000">
+      <div style="height:10px"></div>
+      <button id="pairBtn" class="primary big">Pair</button>
+      <p class="muted">Only paired devices can control the TV, and this device must be on the same Wi-Fi as the TV.
+        No code on the TV? <a href="#" id="showPin">Show it again</a></p>
+      <label class="muted" for="devName">Name of this device</label>
+      <input id="devName" type="text" maxlength="40">
+    </div>
+  </section>
+
+  <!-- "Open … on the TV?" (the bookmarklet's landing page) -->
+  <section id="confirm" class="hidden">
+    <div class="card">
+      <div class="title">Open this page on the TV?</div>
+      <p id="confirmUrl" class="url" style="white-space:normal;overflow-wrap:anywhere"></p>
+      <div class="row">
+        <button id="confirmOpen" class="primary grow">Open on the TV</button>
+        <button id="confirmNo">Remote</button>
+      </div>
+      <p id="confirmMsg" class="muted"></p>
+    </div>
+  </section>
+
+  <section id="remote" class="hidden">
+    <div class="card">
+      <button id="pasteBtn" class="primary big">Open copied link</button>
+      <p id="pasteHint" class="muted hidden">Tap the box below, then <b>Paste</b>: it opens on the TV by itself.</p>
+      <form id="openForm" class="row" style="margin-top:10px">
+        <input id="urlInput" class="grow" type="text" inputmode="url" placeholder="Paste or type a link" autocapitalize="off" autocorrect="off">
+        <button type="submit">Open</button>
+      </form>
+    </div>
+
+    <div id="updateBox" class="banner hidden">
+      <span id="updateText"></span>
+      <div><button id="updateBtn" class="hidden">Update TV app</button></div>
+    </div>
+
+    <div id="startIdle" class="card"></div>
+
+    <div class="card" id="tvCard">
+      <div id="mode" class="muted"></div>
+      <div id="pageTitle" class="title"></div>
+      <div id="pageUrl" class="url"></div>
+      <div style="height:10px"></div>
+      <div id="pic" class="pic"><img id="picImg" alt=""><div id="picNote" class="note">Nothing open on the TV</div></div>
+      <p class="muted" style="margin:6px 0 0">Tap the picture to click on the TV page · drag to scroll · hold for a long tap</p>
+
+      <div id="suggest" class="banner hidden">
+        The video doesn't start? Ad blocking may be in the way on this site.
+        <div><button id="suggestOff">Turn ad blocking off for this site</button></div>
+      </div>
+      <div id="jump" class="banner hidden">
+        <span id="jumpText"></span>
+        <div><button id="jumpOpen">Open anyway</button></div>
+      </div>
+
+      <div class="seek"><span id="pos">0:00</span><input id="seek" type="range" min="0" max="1" step="1" value="0" disabled><span id="dur"></span></div>
+      <div class="controls">
+        <button class="icon" data-cmd="seekby" data-v="-10" aria-label="Back 10 seconds">−10 s</button>
+        <button class="icon" id="playBtn" data-cmd="toggle" aria-label="Play or pause"></button>
+        <button class="icon" data-cmd="seekby" data-v="30" aria-label="Forward 30 seconds">+30 s</button>
+      </div>
+      <div class="grid2">
+        <button data-cmd="volumeby" data-v="-1">Vol −</button>
+        <button data-cmd="volumeby" data-v="1">Vol +</button>
+        <button class="primary" data-cmd="native">Play full screen</button>
+        <button data-cmd="inpage">Page's own player</button>
+        <button id="videosBtn">Videos on the page</button>
+        <button id="typeBtn">Type…</button>
+        <button data-cmd="back">Back</button>
+        <button data-cmd="reload">Reload</button>
+        <button data-cmd="close">Close page</button>
+        <button id="adsBtn">Ad blocking…</button>
+      </div>
+
+      <div id="videos" class="hidden" style="margin-top:12px"><h2>Videos on the TV page</h2><ul id="videoList" class="list"></ul></div>
+
+      <div id="typeBox" class="hidden" style="margin-top:12px">
+        <p class="muted">Tap the field in the picture first, then type here.</p>
+        <input id="typeInput" type="text" autocapitalize="off">
+        <div class="row" style="margin-top:8px"><button id="typeEnter" class="primary grow">Send + Enter</button><button id="typeSend">Send</button></div>
+      </div>
+
+      <div id="adsBox" class="hidden" style="margin-top:12px">
+        <h2>Ad blocking on the TV</h2>
+        <label class="muted" for="adSite" id="adSiteLabel">This site</label>
+        <select id="adSite"><option value="default">As on all sites</option><option value="off">Off</option><option value="standard">Standard</option><option value="aggressive">Aggressive</option></select>
+        <div style="height:8px"></div>
+        <label class="muted" for="adAll">All sites</label>
+        <select id="adAll"><option value="off">Off</option><option value="standard">Standard (cross-site ads and trackers)</option><option value="aggressive">Aggressive (also the site's own ads)</option></select>
+      </div>
+    </div>
+
+    <details class="card" id="startMoreBox">
+      <summary>Open something else</summary>
+      <div id="startMore"></div>
+    </details>
+
+    <details class="card">
+      <summary>More: Shortcut and bookmarklet</summary>
+      <p class="muted">On the Mac: drag this to the bookmarks bar, then click it on any page:
+        <a id="bookmarklet" href="#">Open on TV</a></p>
+      <p class="muted">For Safari on the iPhone: add any bookmark, then edit it and paste this as its address:</p>
+      <code id="bookmarkletText"></code>
+      <p class="muted">Apple Shortcut “Open on TV” (Share menu on the iPhone and the Mac): make a token for it here, then
+        import the shortcut (in your Tab Cast folder) and paste the address and the token when it asks.</p>
+      <button id="tokenBtn">Make a token for a Shortcut</button>
+      <div id="tokenBox" class="hidden" style="margin-top:10px">
+        <p class="muted">TV address</p><code id="tvAddr"></code>
+        <p class="muted">Token (shown once; copy it now)</p><code id="tokenText" class="token"></code>
+        <button id="copyToken" style="margin-top:8px">Copy the token</button>
+      </div>
+    </details>
+
+    <details class="card" id="devicesCard">
+      <summary>Paired devices</summary>
+      <ul id="deviceList" class="list"></ul>
+    </details>
+  </section>
+</main>
+
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+const show = (el, on) => el.classList.toggle('hidden', !on);
+function post(path, body) {
+  return fetch(path, { method: 'POST', credentials: 'same-origin',
+    headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'tabcast' }, body: JSON.stringify(body || {}) });
+}
+function fmt(s) {
+  if (s == null || isNaN(s)) return '';
+  s = Math.max(0, Math.floor(s));
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = String(s % 60).padStart(2, '0');
+  return h ? h + ':' + String(m).padStart(2, '0') + ':' + x : m + ':' + x;
+}
+function guessName() {
+  const ua = navigator.userAgent;
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) return 'iPad';
+  if (/Macintosh/.test(ua)) return 'Mac';
+  if (/Android/.test(ua)) return 'Android';
+  return 'Browser';
+}
+
+const PLAY = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5v15l12.5-7.5z"/></svg>';
+const PAUSE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5h4.2v15H6zm7.8 0H18v15h-4.2z"/></svg>';
+let st = {}, caught = [], paired = false, seeking = false, picRunning = false;
+const openTarget = location.pathname === '/open' ? new URLSearchParams(location.search).get('url') : null;
+
+async function poll() {
+  let r;
+  try { r = await fetch('/api/state', { credentials: 'same-origin' }); } catch (e) { $('#conn').textContent = 'TV not reachable'; return; }
+  if (r.status === 401) { paired = false; showPair(); return; }
+  if (!r.ok) { $('#conn').textContent = 'TV error ' + r.status; return; }
+  const j = await r.json();
+  if (!paired) { paired = true; showRemote(); loadStart(); }
+  st = j.status || {}; caught = j.caught || [];
+  $('#tvName').textContent = j.tv || 'Tab Cast TV';
+  $('#conn').textContent = (j.device ? j.device + ' · ' : '') + 'paired';
+  render();
+}
+
+let askedCode = false;
+async function askCode() {
+  const r = await post('/api/pair/start', { name: $('#devName').value.trim() || guessName() });
+  const j = await r.json().catch(() => ({}));
+  $('#pairMsg').textContent = j.shown ? 'The TV shows a 6-digit code now.' :
+    'The TV is already showing a code (or pairing pauses for a minute after wrong codes).';
+}
+function showPair() {
+  show($('#pair'), true); show($('#remote'), false); show($('#confirm'), false);
+  if (!$('#devName').value) $('#devName').value = guessName();
+  $('#conn').textContent = 'not paired';
+  if (!askedCode) { askedCode = true; askCode(); setTimeout(() => $('#pinInput').focus(), 300); }
+}
+function showRemote() {
+  show($('#pair'), false);
+  show($('#confirm'), !!openTarget);
+  show($('#remote'), !openTarget);
+  if (openTarget) $('#confirmUrl').textContent = openTarget;
+  const bm = "javascript:void(window.open('http://" + location.host + "/open?url='+encodeURIComponent(location.href)))";
+  $('#bookmarklet').setAttribute('href', bm);
+  $('#bookmarkletText').textContent = bm;
+  loadDevices();
+}
+
+function render() {
+  const mode = st.mode || 'idle';
+  const idle = mode === 'idle';
+  show($('#tvCard'), !idle);
+  show($('#startIdle'), idle);
+  show($('#startMoreBox'), !idle);
+  // Rebuild the start view only when its data changes (it renders every second; a rebuild would close "Test pages").
+  const sk = JSON.stringify(startData) + '|' + idle + '|' + (st.url || '');
+  if (sk !== lastStartKey) { lastStartKey = sk; renderStart(idle ? $('#startIdle') : $('#startMore'), idle); }
+  const film = st.kind === 'file' && mode === 'player';
+  const fmt = s => { s = Math.floor(s); const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+  // 0.4.0: a film from the tablet — how long the tablet is still needed, in plain words.
+  const filmNote = !film ? '' : st.waiting === 'true' ? 'Waiting for the tablet: wake it up, the film goes on by itself'
+    : st.complete === 'true' ? 'The whole film is on the TV: the tablet can sleep'
+    : st.heldto ? 'On the TV up to ' + fmt(+st.heldto) : 'Copying to the TV…';
+  const label = film ? 'Playing a film from the tablet · ' + filmNote : { idle: 'Waiting', page: st.loading === 'true' ? 'Page loading…' : 'Page', player: 'Playing full screen' + (st.video ? ' · ' + st.video : ''), inpage: "The page's own player, full screen" }[mode] || mode;
+  const vol = st.vol ? ' · volume ' + Math.round(parseFloat(st.vol) * 100) + ' %' : '';
+  $('#mode').textContent = label + vol + (st.ads && !film ? ' · ads ' + st.ads + (st.adsready === 'false' ? ' (lists not loaded!)' : '') + (st.adsblocked && st.adsblocked !== '0' && mode !== 'idle' ? ' (' + st.adsblocked + ' blocked)' : '') : '');
+  $('#pageTitle').textContent = mode === 'idle' ? 'Nothing open on the TV' : (st.title || '');
+  $('#pageUrl').textContent = mode === 'idle' ? '' : (st.url || '');
+  const note = mode === 'idle' ? 'Nothing open on the TV' : film ? '▶ ' + (st.title || '') : mode === 'player' ? "Playing in the TV's own player (its picture isn't sent here)" : '';
+  $('#picNote').textContent = note; show($('#picNote'), !!note);
+  if (mode === 'page' || mode === 'inpage') startPic(); else { picRunning = false; $('#picImg').removeAttribute('src'); }
+  const dur = parseFloat(st.dur), pos = parseFloat(st.pos);
+  if (!seeking) {
+    $('#seek').disabled = !(dur > 0);
+    $('#seek').max = dur > 0 ? Math.floor(dur * 10) : 1;
+    $('#seek').value = pos > 0 ? Math.floor(pos * 10) : 0;
+    $('#pos').textContent = isNaN(pos) ? '' : fmt(pos);
+  }
+  $('#dur').textContent = dur > 0 ? fmt(dur) : (isNaN(pos) ? '' : 'live');
+  $('#playBtn').innerHTML = st.playing === 'true' ? PAUSE : PLAY;
+  $('#videosBtn').textContent = 'Videos on the page (' + caught.length + ')';
+  $('#videosBtn').disabled = caught.length === 0;
+  show($('#suggest'), st.adssuggest === 'true');
+  // 0.5.1: Tab Cast TV updates itself (older TVs send neither key).
+  show($('#updateBox'), !!(st.update || st.updatestate));
+  $('#updateText').textContent = st.updatestate || (st.update ? 'Tab Cast TV ' + st.update + ' is ready.' : '');
+  show($('#updateBtn'), !!st.update);
+  $('#updateBtn').textContent = 'Update TV app to ' + (st.update || '');
+  show($('#jump'), !!st.blocked);
+  if (st.blocked) { try { $('#jumpText').textContent = 'The TV stopped a jump to ' + new URL(st.blocked).host + ' without a click.'; } catch (e) {} }
+  let site = ''; try { site = new URL(st.url).hostname.replace(/^www\./, ''); } catch (e) {}
+  $('#adSiteLabel').textContent = site && mode !== 'idle' ? 'This site (' + site + ')' : 'This site (open a page first)';
+  $('#adSite').disabled = !site || mode === 'idle';
+  if (document.activeElement !== $('#adSite')) $('#adSite').value = st.adssite || 'default';
+  if (document.activeElement !== $('#adAll') && st.adsglobal) $('#adAll').value = st.adsglobal;
+}
+
+// Live picture of the TV page: fetched ~3 times a second while it is visible (the TV makes them only then).
+async function startPic() {
+  if (picRunning) return;
+  picRunning = true;
+  while (picRunning && !document.hidden) {
+    try {
+      const r = await fetch('/api/preview.jpg', { credentials: 'same-origin', cache: 'no-store' });
+      if (r.status === 200) {
+        const url = URL.createObjectURL(await r.blob());
+        const img = $('#picImg'), old = img.src;
+        img.src = url;
+        if (old && old.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(old), 1000);
+      }
+    } catch (e) {}
+    await new Promise((res) => setTimeout(res, 330));
+  }
+  picRunning = false;
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) render(); });
+
+// Tap / drag / hold on the picture → the TV page.
+(function () {
+  const pic = $('#pic');
+  let x0 = 0, y0 = 0, t0 = 0, down = false;
+  pic.addEventListener('pointerdown', (e) => { down = true; x0 = e.clientX; y0 = e.clientY; t0 = Date.now(); pic.setPointerCapture(e.pointerId); e.preventDefault(); });
+  pic.addEventListener('pointerup', (e) => {
+    if (!down) return; down = false;
+    const r = pic.getBoundingClientRect(), dx = e.clientX - x0, dy = e.clientY - y0;
+    if (Math.abs(dx) < 12 && Math.abs(dy) < 12) post('/api/tap', { x: (x0 - r.left) / r.width, y: (y0 - r.top) / r.height, long: Date.now() - t0 > 600 });
+    else post('/api/scroll', { dx: -dx / r.width, dy: -dy / r.height });
+  });
+  pic.addEventListener('pointercancel', () => { down = false; });
+})();
+
+document.querySelectorAll('[data-cmd]').forEach((b) => b.addEventListener('click', () => post('/api/cmd', { c: b.dataset.cmd, v: b.dataset.v || '' }).then(poll)));
+$('#seek').addEventListener('input', () => { seeking = true; $('#pos').textContent = fmt($('#seek').value / 10); });
+$('#seek').addEventListener('change', () => { post('/api/cmd', { c: 'seek', v: String($('#seek').value / 10) }); setTimeout(() => { seeking = false; }, 800); });
+function openOnTv(text) {
+  let u = (text || '').trim();
+  const m = u.match(/https?:\/\/[^\s<>"]+/i);       // a link inside shared text ("Look at this: https://…")
+  if (m) u = m[0];
+  if (!u) return;
+  if (!/^https?:\/\//i.test(u)) u = /\s/.test(u) || !/\./.test(u) ? 'https://duckduckgo.com/?q=' + encodeURIComponent(u) : 'https://' + u;
+  post('/api/open', { url: u }).then(() => { $('#urlInput').value = ''; $('#urlInput').blur(); show($('#pasteHint'), false); poll(); });
+}
+$('#openForm').addEventListener('submit', (e) => { e.preventDefault(); openOnTv($('#urlInput').value); });
+// Pasting a link into the box opens it at once (works on plain http, where Safari has no clipboard API).
+$('#urlInput').addEventListener('paste', (e) => {
+  const t = (e.clipboardData || window.clipboardData).getData('text');
+  if (/https?:\/\//i.test(t)) { e.preventDefault(); openOnTv(t); }
+});
+$('#pasteBtn').addEventListener('click', async () => {
+  if (navigator.clipboard && navigator.clipboard.readText) {     // only on https/localhost pages
+    try { const t = await navigator.clipboard.readText(); if (t) { openOnTv(t); return; } } catch (e) {}
+  }
+  show($('#pasteHint'), true);
+  $('#urlInput').focus();
+});
+
+// --- start view: your sites, recent pages, test pages (idle: on top; with a page open: under "Open something else")
+let startData = null, lastStartKey = '';
+function hue(s) { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+function host(u) { try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return u; } }
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function renderStart(box, idle) {
+  box.innerHTML = '';
+  const d = startData || { sites: [], recent: [], tests: [] };
+  if (idle) box.appendChild(el('div', 'title', 'Open on the TV'));
+  box.appendChild(el('h2', null, 'Your sites'));
+  if (d.sites.length) {
+    const g = el('div', 'tiles');
+    d.sites.forEach((x) => {
+      const b = el('button', 'tile'); const av = el('span', 'av', (x.title || host(x.url)).trim().charAt(0).toUpperCase());
+      av.style.background = 'hsl(' + hue(host(x.url)) + ',45%,42%)';
+      b.appendChild(av); b.appendChild(el('span', 'tt', x.title || host(x.url)));
+      b.onclick = () => openOnTv(x.url);
+      g.appendChild(b);
+    });
+    box.appendChild(g);
+  } else box.appendChild(el('p', 'muted', 'The sites on the tablet\'s start page show up here once the tablet has connected to the TV.'));
+  if (st.mode && st.mode !== 'idle' && st.url) {
+    const add = el('button', null, 'Add the TV\'s page to your sites');
+    add.style.marginTop = '8px';
+    add.onclick = () => post('/api/sites/add', {}).then(loadStart);
+    box.appendChild(add);
+  }
+  if (d.recent.length) {
+    box.appendChild(el('h2', null, 'Recently on the TV'));
+    const ul = el('ul', 'list recent');
+    d.recent.slice(0, 8).forEach((x) => {
+      const li = el('li'); const b = el('button');
+      b.appendChild(el('div', null, x.title || host(x.url))); b.appendChild(el('div', 'host', host(x.url)));
+      b.onclick = () => openOnTv(x.url);
+      li.appendChild(b); ul.appendChild(li);
+    });
+    box.appendChild(ul);
+  }
+  const det = el('details'); det.appendChild(el('summary', null, 'Test pages: check that video plays'));
+  const chips = el('div', 'chips');
+  d.tests.forEach((x) => { const b = el('button', null, x.title); b.onclick = () => openOnTv(x.url); chips.appendChild(b); });
+  det.appendChild(chips); box.appendChild(det);
+}
+async function loadStart() {
+  const r = await fetch('/api/start', { credentials: 'same-origin' });
+  if (r.ok) { startData = await r.json(); render(); }
+}
+setInterval(() => { if (paired && !document.hidden) loadStart(); }, 10000);
+$('#videosBtn').addEventListener('click', () => {
+  const box = $('#videos'), list = $('#videoList');
+  list.innerHTML = '';
+  caught.forEach((c, i) => { const li = document.createElement('li'); const b = document.createElement('button'); b.className = 'grow'; b.style.textAlign = 'left'; b.textContent = c; b.onclick = () => { post('/api/cmd', { c: 'candidate', v: String(i) }); show(box, false); }; li.appendChild(b); list.appendChild(li); });
+  show(box, box.classList.contains('hidden'));
+});
+$('#typeBtn').addEventListener('click', () => { const b = $('#typeBox'); show(b, b.classList.contains('hidden')); if (!b.classList.contains('hidden')) $('#typeInput').focus(); });
+$('#typeEnter').addEventListener('click', () => { post('/api/text', { text: $('#typeInput').value, enter: true }); $('#typeInput').value = ''; });
+$('#typeSend').addEventListener('click', () => { post('/api/text', { text: $('#typeInput').value, enter: false }); $('#typeInput').value = ''; });
+$('#adsBtn').addEventListener('click', () => { const b = $('#adsBox'); show(b, b.classList.contains('hidden')); });
+$('#adSite').addEventListener('change', () => post('/api/cmd', { c: 'adsite', v: $('#adSite').value }).then(poll));
+$('#adAll').addEventListener('change', () => post('/api/cmd', { c: 'adlevel', v: $('#adAll').value }).then(poll));
+$('#suggestOff').addEventListener('click', () => post('/api/cmd', { c: 'adsite', v: 'off' }).then(poll));
+$('#updateBtn').addEventListener('click', () => post('/api/cmd', { c: 'update', v: 'install' }).then(poll));
+$('#jumpOpen').addEventListener('click', () => post('/api/cmd', { c: 'openblocked' }).then(poll));
+
+// Pairing
+$('#showPin').addEventListener('click', (e) => { e.preventDefault(); askCode(); $('#pinInput').focus(); });
+$('#pinInput').addEventListener('input', () => { if ($('#pinInput').value.replace(/\D/g, '').length === 6) $('#pairBtn').click(); });
+$('#pairBtn').addEventListener('click', async () => {
+  const r = await post('/api/pair', { pin: $('#pinInput').value, name: $('#devName').value.trim() || guessName(), kind: 'web' });
+  const j = await r.json().catch(() => ({}));
+  if (j.ok) { $('#pairMsg').textContent = 'Paired.'; $('#pinInput').value = ''; poll(); return; }
+  $('#pairMsg').textContent = j.wait ? 'Too many wrong codes: wait ' + j.wait + ' s, then show a new code.' :
+    j.tries != null ? 'Wrong code, ' + j.tries + ' tries left.' : (j.error || 'Not paired.');
+});
+
+// Bookmarklet landing page
+$('#confirmOpen').addEventListener('click', async () => {
+  const r = await post('/api/open', { url: openTarget });
+  $('#confirmMsg').textContent = r.ok ? 'Opened on the TV.' : 'The TV refused it (' + r.status + ').';
+  if (r.ok) setTimeout(() => { history.replaceState(null, '', '/'); location.reload(); }, 900);
+});
+$('#confirmNo').addEventListener('click', () => { history.replaceState(null, '', '/'); location.reload(); });
+
+// Tokens for Shortcuts, paired devices
+$('#tokenBtn').addEventListener('click', async () => {
+  const r = await post('/api/token', { name: 'Shortcut (' + guessName() + ')' });
+  const j = await r.json().catch(() => ({}));
+  if (!j.ok) return;
+  $('#tvAddr').textContent = location.origin;
+  $('#tokenText').textContent = j.token;
+  show($('#tokenBox'), true);
+  loadDevices();
+});
+$('#copyToken').addEventListener('click', async () => {
+  try { await navigator.clipboard.writeText($('#tokenText').textContent); $('#copyToken').textContent = 'Copied'; }
+  catch (e) { const s = window.getSelection(), rg = document.createRange(); rg.selectNodeContents($('#tokenText')); s.removeAllRanges(); s.addRange(rg); }
+});
+async function loadDevices() {
+  const r = await fetch('/api/devices', { credentials: 'same-origin' });
+  if (!r.ok) return;
+  const list = $('#deviceList'); list.innerHTML = '';
+  (await r.json()).forEach((d) => {
+    const li = document.createElement('li');
+    const t = document.createElement('span'); t.className = 'grow';
+    t.textContent = d.name + ' · ' + d.kind + (d.you ? ' (this one)' : '') + ' · last seen ' + new Date(d.lastSeen).toLocaleString();
+    const b = document.createElement('button'); b.textContent = 'Remove';
+    b.onclick = () => { if (!d.you || confirm('Remove this device? It has to be paired again.')) post('/api/devices/revoke', { id: d.id }).then(() => { loadDevices(); poll(); }); };
+    li.appendChild(t); li.appendChild(b); list.appendChild(li);
+  });
+}
+
+poll();
+setInterval(() => { if (!document.hidden) poll(); }, 1000);
+</script>
+</body>
+</html>

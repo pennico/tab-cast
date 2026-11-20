@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Silenced on purpose: English-only UI built in code; app-context singletons; plain HTTP is needed (relay, old sites);
+     webkit feature checks happen at runtime (WebCatcher.setup); pinned dependency versions (see README). -->
+<lint>
+    <issue id="SetTextI18n" severity="ignore" />
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="OldTargetApi" severity="ignore" />
+    <issue id="StaticFieldLeak" severity="ignore" />
+    <issue id="ChromeOsAbiSupport" severity="ignore" />
+    <issue id="MonochromeLauncherIcon" severity="ignore" />
+    <issue id="RequiresFeature" severity="ignore" />
+    <issue id="InsecureBaseConfiguration" severity="ignore" />
+    <issue id="DataExtractionRules" severity="ignore" />
+    <issue id="ObsoleteSdkInt" severity="ignore" />
+</lint>

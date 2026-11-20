@@ -1,0 +1,34 @@
+{
+  "_comment": "Tab Cast built-in site rules. Your own rules (Settings > Site rules) are added on top of these. Fields: see README.md#site-rules.",
+  "rules": [
+    {
+      "name": "YouTube (its web player streams in a way the TV can't replay; yt-dlp asks YouTube for a castable HLS/MP4 link)",
+      "match": "(^|\\.)(youtube\\.com|youtu\\.be|youtube-nocookie\\.com)$",
+      "resolver": "ytdlp",
+      "_ytdlpTryFirst": "visionos (YouTube's Apple Vision Pro app) returns the HLS master with all qualities and needs neither YouTube's player script nor its JavaScript challenge, which took most of a minute in QuickJS on the Tab S2 (2026-11-14). If it fails (age check, signed-in cookies, a YouTube change), yt-dlp runs again with its default clients.",
+      "ytdlpTryFirst": [
+        "--extractor-args",
+        "youtube:player_client=visionos"
+      ],
+      "ytdlpAuto": "[?&]v=[\\w-]{11}|/(shorts|live|embed)/[\\w-]{11}|youtu\\.be/[\\w-]{11}"
+    },
+    {
+      "name": "Vimeo: its web player loads its own segment format (catching finds only pieces), and since 2026 yt-dlp needs a login for vimeo.com pages but not for the embedded player, so yt-dlp gets the player URL",
+      "match": "(^|\\.)vimeo\\.com$",
+      "resolver": "ytdlp",
+      "ignore": [
+        "/segment\\.mp4"
+      ],
+      "ytdlpRewrite": [
+        "^https?://(?:www\\.)?vimeo\\.com/(?:channels/[^/]+/|groups/[^/]+/videos/)?(\\d+)(?:/([0-9a-f]+))?.*$",
+        "https://player.vimeo.com/video/$1?h=$2"
+      ],
+      "ytdlpAuto": "vimeo\\.com/(channels/[^/]+/|groups/[^/]+/videos/|video/)?\\d+"
+    },
+    {
+      "name": "Dailymotion: yt-dlp needs browser impersonation (curl_cffi), which the Android build lacks, so Share opens the page and the video is caught there",
+      "match": "(^|\\.)(dailymotion\\.com|dai\\.ly)$",
+      "resolver": "browser"
+    }
+  ]
+}

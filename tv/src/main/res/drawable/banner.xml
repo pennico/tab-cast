@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV launcher banner (320x180 dp): icon and the name. -->
+<!-- 320x180 dp is the size Android TV asks for a banner, so the vector-size warning doesn't apply. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools"
+    tools:ignore="VectorRaster"
+    android:width="320dp" android:height="180dp" android:viewportWidth="320" android:viewportHeight="180">
+    <path android:fillColor="#FF1E2A33" android:pathData="M0,0h320v180h-320z" />
+    <path android:fillColor="#FF4FC3F7" android:pathData="M40,50h90v60h-90z" />
+    <path android:fillColor="#FF1E2A33" android:pathData="M75,62l25,18l-25,18z" />
+    <path android:fillColor="#FF4FC3F7" android:pathData="M65,118h40v6h-40z" />
+    <path android:fillColor="#FFFFFFFF" android:pathData="M150,66h130v14h-130z" />
+    <path android:fillColor="#FF9AA7B0" android:pathData="M150,92h96v8h-96z" />
+</vector>
