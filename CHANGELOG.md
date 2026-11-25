@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.4 (2026-11-26): subtitles that don't stop the film, more subtitle formats, steadier Mirror screen
+
+1. **A subtitle or sound track the TV can't play no longer freezes the film.** Choosing one used to force it on; the
+   player failed, and every retry failed again with the same track until subtitles were turned off. Now the TV
+   refuses such a track with a note and keeps the current one, and a subtitle track that fails while playing is
+   turned off while the film goes on. The tablet's Subtitles…/Sound… explain a track marked "can't play here" and
+   offer "Choose a subtitle file" instead.
+2. **DVD subtitles (VobSub) inside films now show**: Tab Cast TV moves from Media3 1.4.1 to 1.9.4. Films can also
+   carry SubRip, SSA/ASS, WebVTT, TTML, Blu-ray PGS and DVB subtitles.
+3. **More subtitle files**: MicroDVD and SubViewer (`.sub`), YouTube `.sbv`, SAMI `.smi` and MPL2 are converted to
+   SubRip on the tablet (so older TV versions show them too); TTML/DFXP goes to the TV as it is. SubRip files with a
+   dot before the milliseconds or without cue numbers, which were accepted but showed nothing, are rewritten in the
+   strict form. Picture subtitle files (VobSub `.idx`/`.sub`) are refused with a plain message.
+4. **Mirror screen keeps going after a lost encoder.** It used to step down to the software VP8 encoder after three
+   losses within a minute, and on some tablets that encoder never produces a frame, so mirroring stopped within
+   seconds. Now the hardware encoder is made again after a growing pause (0.3 s, 1 s, 2 s); the software one is used
+   only when there is no hardware encoder or it has already worked; mirroring stops only after about ten losses in a
+   minute. The encoder also gets evenly spaced timestamps instead of capture times (which jump by seconds on a still
+   screen, the likely trigger of the losses), and the log line of a loss names the gap before it and the last
+   setting change.
+
 ## 0.5.3 (2026-11-20): first public source release
 
 1. **Open source** under GPL-3.0-or-later: `LICENSE`, `THIRD_PARTY.md` (every bundled library and filter list with

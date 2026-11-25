@@ -12,8 +12,8 @@ android {
         applicationId = "dk.pennico.tabcast"
         minSdk = 26          // FCast sender SDK needs 26; the tablet runs Android 14 (API 34)
         targetSdk = 34
-        versionCode = 14
-        versionName = "0.5.3"
+        versionCode = 15
+        versionName = "0.5.4"
         // The tablet is 32-bit ARM only; shipping just this ABI keeps the APK ~4x smaller
         // (yt-dlp's bundled Python alone is ~13 MB per ABI).
         ndk { abiFilters += listOf("armeabi-v7a") }
