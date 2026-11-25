@@ -54,7 +54,7 @@ android {
 dependencies {
     implementation(project(":shared"))
     implementation(project(":link"))
-    val media3 = "1.4.1"
+    val media3 = "1.9.4"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")
     implementation("androidx.media3:media3-exoplayer-dash:$media3")

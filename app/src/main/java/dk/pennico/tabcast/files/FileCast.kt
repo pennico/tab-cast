@@ -131,13 +131,13 @@ object FileCast {
     private fun subtitlesFor(ctx: Context, p: Picked, id: String): Subtitles.Ready? {
         findSubtitles(p)?.let { f ->
             val r = runCatching { Subtitles.prepare(f.name, f.readBytes()) }.getOrNull()
-            if (r != null) { AppLog.i("file: subtitles next to the film: ${f.name} (${r.charset}, ${r.format}, ${r.cues} lines)"); return r }
+            if (r != null) { AppLog.i("file: subtitles next to the film: ${f.name} (${r.charset}, ${r.source}, ${r.cues} lines)"); return r }
             AppLog.i("file: ${f.name} next to the film isn't a subtitle file Tab Cast can use")
         }
         val chosen = subsPrefs(ctx).getString(id, null)?.let { Uri.parse(it) } ?: return null
         val r = readSubs(ctx, chosen)
         if (r == null) AppLog.i("file: the subtitle file chosen for this film can't be read any more")
-        else AppLog.i("file: subtitles chosen for this film before (${r.charset}, ${r.format}, ${r.cues} lines)")
+        else AppLog.i("file: subtitles chosen for this film before (${r.charset}, ${r.source}, ${r.cues} lines)")
         return r
     }
 
@@ -165,7 +165,7 @@ object FileCast {
      */
     fun addSubtitles(ctx: Context, uri: Uri): String? {
         val sv = current ?: return "No film from this tablet is playing"
-        val r = readSubs(ctx, uri) ?: return "That isn't a subtitle file Tab Cast can read (.srt, .vtt, .ass or .ssa)"
+        val r = readSubs(ctx, uri) ?: return "That isn't a subtitle file Tab Cast can read (text subtitles: .srt, .vtt, .ass/.ssa, .sub, .sbv, .smi, .ttml; picture subtitles such as VobSub .idx/.sub can't be sent as a file)"
         runCatching { ctx.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         val sp = subsPrefs(ctx)
         sp.edit().putString(sv.id, uri.toString()).apply()
@@ -173,7 +173,7 @@ object FileCast {
         sv.subs?.let { server.remove(it) }
         sv.subs = serveSubs(sv.picked, r)
         send(sv)
-        AppLog.i("file: subtitles chosen for \"${sv.picked.name}\": ${r.charset}, ${r.format}, ${r.cues} lines; sent to the TV")
+        AppLog.i("file: subtitles chosen for \"${sv.picked.name}\": ${r.charset}, ${r.source}, ${r.cues} lines; sent to the TV")
         return null
     }
 

@@ -141,7 +141,7 @@ class TvPlayer(private val ctx: Context, private val view: PlayerView, private v
     }
 
     /**
-     * 0.5.4: the error came from the subtitles: the text renderer failed (Media3 1.4.1 throws "Legacy decoding is
+     * 0.5.4: the error came from the subtitles: the text renderer failed (Media3 throws "Legacy decoding is
      * disabled" for VobSub), or a runtime check failed while a subtitle track was forced. Turning subtitles off fixes it.
      */
     private fun subtitleFault(p: ExoPlayer, e: PlaybackException): Boolean {

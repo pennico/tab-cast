@@ -79,11 +79,13 @@ class TvFilms(ctx: Context) {
     }
 
     private fun subsMimeOf(f: Film): String = f.subsMime ?: when ((f.subsUrl ?: "").substringBefore('?').substringAfterLast('.').lowercase()) {
-        "vtt" -> MimeTypes.TEXT_VTT; "ass", "ssa" -> MimeTypes.TEXT_SSA; else -> MimeTypes.APPLICATION_SUBRIP
+        "vtt" -> MimeTypes.TEXT_VTT; "ass", "ssa" -> MimeTypes.TEXT_SSA
+        "ttml", "dfxp" -> MimeTypes.APPLICATION_TTML // 0.5.4
+        else -> MimeTypes.APPLICATION_SUBRIP
     }
 
     private fun subsPath(f: Film) = File(subsDir, f.id + "." + when (subsMimeOf(f)) {
-        MimeTypes.TEXT_VTT -> "vtt"; MimeTypes.TEXT_SSA -> "ass"; else -> "srt" })
+        MimeTypes.TEXT_VTT -> "vtt"; MimeTypes.TEXT_SSA -> "ass"; MimeTypes.APPLICATION_TTML -> "ttml"; else -> "srt" })
 
     /**
      * 0.5.1: fetches the film's subtitle file from the tablet into the TV's own storage (blocking, a few kB; off the

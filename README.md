@@ -164,10 +164,17 @@ only from there (`tv/FilmSource.kt`), so the tablet can sleep once the TV holds 
 - tracks: Media3 lists audio/subtitle tracks; unsupported ones (DTS on the Chromecast HD) are marked, and a film with
   no playable sound says so
 - subtitles (0.5.1): remote › Subtitles… › **Choose a subtitle file…** (remembered per film), or a same-name file
-  next to the film (`Film.srt`, `Film.en.srt`, `.vtt`, `.ass`), found only when Android lets Tab Cast list the film's
+  next to the film (`Film.srt`, `Film.en.srt`, …), found only when Android lets Tab Cast list the film's
   folder (optional `adb shell appops set --uid dk.pennico.tabcast MANAGE_EXTERNAL_STORAGE allow`, undo `…
   MANAGE_EXTERNAL_STORAGE default`). Read in any common encoding and sent as UTF-8 (`link/Subtitles.kt`); the TV
-  keeps its own copy (the tablet may sleep) and shows them large on a dark box. Embedded subtitles always work
+  keeps its own copy (the tablet may sleep) and shows them large on a dark box.
+  Subtitle files (0.5.4): SubRip `.srt` (also with '.' before the milliseconds or without cue numbers), WebVTT `.vtt`,
+  SSA/ASS, TTML/DFXP, and, converted to SubRip on the tablet, MicroDVD and SubViewer (`.sub`; MicroDVD without a
+  frame rate in the file is read at 23.976 fps), YouTube `.sbv`, SAMI `.smi` (first language) and MPL2. Picture
+  subtitles (VobSub `.idx`/`.sub`, PGS `.sup`) can't be sent as files.
+  Subtitles inside the film (0.5.4: Media3 1.9): SubRip, SSA/ASS, WebVTT, TTML, DVD VobSub, Blu-ray PGS and DVB. A
+  track the TV still can't use is marked "can't play here" in Subtitles…/Sound…; choosing it changes nothing, and a
+  subtitle track that fails while playing is turned off while the film goes on
 
 ## Mirror screen (0.5.0)
 

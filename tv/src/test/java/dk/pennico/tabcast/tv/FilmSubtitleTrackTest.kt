@@ -11,6 +11,7 @@ import dk.pennico.tabcast.link.LinkClient
 import dk.pennico.tabcast.link.Wire
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.After
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -23,15 +24,25 @@ import java.time.Duration
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
- * 0.5.4: a film's own subtitle track the TV can't show (VobSub: Media3 1.4.1 has no parser for it) must not stop the
- * film. Before, choosing it forced the track on, the player failed, and every retry failed again with the same track.
+ * 0.5.4: a subtitle track the TV can't show must not stop the film. Before (Media3 1.4.1, a film's own VobSub track),
+ * choosing it forced the track on, the player failed, and every retry failed again with the same track. Media3 1.9
+ * reads VobSub, so that one is now a normal track; a subtitle file in a format no player reads takes its place here.
  * End to end through TvActivity over the real link and FileServer, with a tiny generated Matroska file.
  */
 @OptIn(UnstableApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
 class FilmSubtitleTrackTest {
-    @Before fun noUpdateChecks() { TvUpdates.autoCheck = false }
+    private var autoCheck = true
+    @Before fun noUpdateChecks() { autoCheck = TvUpdates.autoCheck; TvUpdates.autoCheck = false }
+    @After fun restoreUpdateChecks() { TvUpdates.autoCheck = autoCheck }
+
+    /** Like the smoke tests: close the film (the TV saves its position, keeps the cache) before the activity goes. */
+    private fun done(c: org.robolectric.android.controller.ActivityController<TvActivity>, tv: Tv, server: dk.pennico.tabcast.link.FileServer) {
+        tv.p.sendKv(Wire.CMD, "c" to Wire.Cmd.CLOSE)
+        pump { tv.a.mode == "idle" && tv.a.film == null }
+        server.stop(); tv.p.close(); c.pause().stop().destroy()
+    }
 
     private fun pump(maxMs: Long = 8000, cond: () -> Boolean): Boolean {
         val end = System.currentTimeMillis() + maxMs
@@ -101,14 +112,26 @@ class FilmSubtitleTrackTest {
 
     private fun last(t: Tv, k: String) = t.status.lastOrNull()?.get(k)
 
-    /** Sends [film] as a cast file and waits until the TV lists its subtitle track. */
-    private fun castFilm(tv: Tv, server: dk.pennico.tabcast.link.FileServer, film: ByteArray, name: String) {
+    /**
+     * Sends [film] as a cast file, with [subs] as a subtitle file from the tablet of type [subsMime], and waits until
+     * the TV lists [tracks] subtitle tracks.
+     */
+    private fun castFilm(tv: Tv, server: dk.pennico.tabcast.link.FileServer, film: ByteArray, name: String,
+                         subs: ByteArray? = null, subsMime: String? = null, tracks: Int = 1) {
         val port = server.start()
         val e = server.add(name, "video/x-matroska", source(film))
+        val extra = if (subs == null) emptyArray() else arrayOf<Pair<String, Any?>>(
+            "subs" to server.url("127.0.0.1:$port", server.add("$name.subs", subsMime!!, source(subs))), "subsmime" to subsMime)
         tv.p.sendKv(Wire.FILE, "url" to server.url("127.0.0.1:$port", e), "name" to name, "size" to film.size,
-            "id" to "$name|${film.size}", "mime" to "video/x-matroska", "rate" to 200)
-        assertTrue("the TV lists the film's subtitle track", pump { !last(tv, Wire.Status.S_TRACKS).isNullOrEmpty() })
+            "id" to "$name|${film.size}", "mime" to "video/x-matroska", "rate" to 200, *extra)
+        assertTrue("the TV lists the film's subtitle tracks",
+            pump { (last(tv, Wire.Status.S_TRACKS) ?: "").split('|').count { it.isNotBlank() } >= tracks })
     }
+
+    /** A subtitle file in a format no Media3 version reads: listed, but the TV can't show it. */
+    private val unreadable = "UNREADABLE SUBTITLES 1\n" to "text/x-tabcast-unreadable"
+
+    private fun unplayableIndex(tv: Tv) = (last(tv, Wire.Status.S_TRACKS) ?: "").split('|').indexOfFirst { "can't play here" in it }
 
     /**
      * No player error during [ms] (0.5.3 showed "Trying again" within 3 s and never got further). The 10 s test film
@@ -120,31 +143,46 @@ class FilmSubtitleTrackTest {
         return errors.none { it.startsWith("Trying again") || it.startsWith("The TV can't play") || it.startsWith("TV player") }
     }
 
-    @Test fun choosingAnUnplayableSubtitleTrackIsRefusedAndTheFilmPlaysOn() {
+    /** Media3 1.9 reads VobSub (DVD picture subtitles): the film's own VobSub track is listed as playable and can be chosen. */
+    @Test fun aVobSubTrackCanBeChosen() {
         val (c, tv) = pairedTv()
         val server = dk.pennico.tabcast.link.FileServer()
         castFilm(tv, server, mkv("S_VOBSUB", vobsubIdx, ByteArray(64) { 1 }), "Vobsub film.mkv")
-        assertTrue(last(tv, Wire.Status.S_TRACKS)!!.contains("can't play here"))
+        assertFalse("VobSub is not marked unplayable", last(tv, Wire.Status.S_TRACKS)!!.contains("can't play here"))
         tv.p.sendKv(Wire.CMD, "c" to Wire.Cmd.SUBS, "v" to "0")
+        assertTrue("the VobSub track is selected", pump { last(tv, Wire.Status.S_TRACK) == "0" })
+        assertTrue("the film plays on with it", keepsPlaying(tv, 6_000))
+        done(c, tv, server)
+    }
+
+    @Test fun choosingAnUnplayableSubtitleTrackIsRefusedAndTheFilmPlaysOn() {
+        val (c, tv) = pairedTv()
+        val server = dk.pennico.tabcast.link.FileServer()
+        castFilm(tv, server, mkv("S_TEXT/UTF8", null, "A line".toByteArray()), "Text film.mkv",
+            unreadable.first.toByteArray(), unreadable.second, tracks = 2)
+        val i = unplayableIndex(tv)
+        assertTrue("the TV marks the unreadable file's track: ${last(tv, Wire.Status.S_TRACKS)}", i >= 0)
+        tv.p.sendKv(Wire.CMD, "c" to Wire.Cmd.SUBS, "v" to "$i")
         assertTrue("the film keeps playing after the unplayable track was chosen", keepsPlaying(tv, 8_000))
-        assertFalse("the unplayable track is not selected", last(tv, Wire.Status.S_TRACK) == "0")
-        server.stop(); tv.p.close(); c.pause().stop().destroy()
+        assertFalse("the unplayable track is not selected", last(tv, Wire.Status.S_TRACK) == "$i")
+        done(c, tv, server)
     }
 
     /** The second line of defence: a subtitle track that fails while playing is turned off, and the film goes on. */
     @Test fun aSubtitleTrackThatFailsWhilePlayingIsTurnedOff() {
         val (c, tv) = pairedTv()
         val server = dk.pennico.tabcast.link.FileServer()
-        castFilm(tv, server, mkv("S_VOBSUB", vobsubIdx, ByteArray(64) { 1 }), "Vobsub film 2.mkv")
-        // Force the track the way 0.5.3 did, past the new check (as an older tablet's command or a default flag might).
+        castFilm(tv, server, mkv("S_TEXT/UTF8", null, "A line".toByteArray()), "Text film 2.mkv",
+            unreadable.first.toByteArray(), unreadable.second, tracks = 2)
+        // Force the track the way 0.5.3 did, past the new check (as an older tablet's command might).
         val tp = TvActivity::class.java.getDeclaredField("player").apply { isAccessible = true }.get(tv.a) as TvPlayer
         val exo = TvPlayer::class.java.getDeclaredField("player").apply { isAccessible = true }.get(tp) as ExoPlayer
-        val g = exo.currentTracks.groups.first { it.type == C.TRACK_TYPE_TEXT }
+        val g = exo.currentTracks.groups.first { it.type == C.TRACK_TYPE_TEXT && !it.isTrackSupported(0) }
         exo.trackSelectionParameters = exo.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
             .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
         assertTrue("the film keeps playing after the subtitle track failed", keepsPlaying(tv, 10_000))
         assertTrue("subtitles are off", exo.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT))
-        server.stop(); tv.p.close(); c.pause().stop().destroy()
+        done(c, tv, server)
     }
 
     @Test fun aPlayableSubtitleTrackCanStillBeChosen() {
@@ -155,6 +193,6 @@ class FilmSubtitleTrackTest {
         assertTrue(pump { last(tv, Wire.Status.S_TRACK) == "-1" || last(tv, Wire.Status.S_TRACK) == null })
         tv.p.sendKv(Wire.CMD, "c" to Wire.Cmd.SUBS, "v" to "0")
         assertTrue("the playable track is selected", pump { last(tv, Wire.Status.S_TRACK) == "0" })
-        server.stop(); tv.p.close(); c.pause().stop().destroy()
+        done(c, tv, server)
     }
 }

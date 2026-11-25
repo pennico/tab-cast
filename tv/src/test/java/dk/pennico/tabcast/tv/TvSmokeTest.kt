@@ -230,6 +230,9 @@ class TvSmokeTest {
         assertEquals("Test film.mkv", status.last()[Wire.Status.TITLE])
         val film = a.film!!
         assertTrue("the whole (small) film is copied to the TV", pump { film.cache.stats().complete })
+        // pump() never moves the clock, so the TV's once-a-second status only comes from events; whether the (fake)
+        // film's player error comes before or after the copy ends depends on timing. One second of clock sends it.
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(1100))
         assertTrue(pump { status.last()[Wire.Status.COMPLETE] == "true" })
         assertTrue(e.bytesServed.get() >= data.size)
         // 0.5.1: subtitles chosen on the tablet while the film plays: the same FILE with a subtitle address; the TV keeps

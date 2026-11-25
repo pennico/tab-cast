@@ -14,7 +14,7 @@ at the time of writing.
 | ↳ QuickJS (`libqjs.so`, JavaScript runtime for yt-dlp) | tablet | MIT | https://bellard.org/quickjs/ |
 | FCast sender SDK `sender-sdk-minimal` 0.4.1 (FUTO; Rust core `libfcast_sender_sdk.so` with its crates) | tablet | MIT (FCast project); the crates MIT and/or Apache-2.0 | https://gitlab.futo.org/videostreaming/fcast |
 | JNA 5.13.0 (`libjnidispatch.so`, used by the FCast SDK's bindings) | tablet | Apache-2.0 or LGPL-2.1-or-later (dual) | https://github.com/java-native-access/jna |
-| AndroidX Media3 1.4.1 (ExoPlayer, HLS, DASH, UI) | TV | Apache-2.0 | https://github.com/androidx/media |
+| AndroidX Media3 1.9.4 (ExoPlayer, HLS, DASH, UI) | TV | Apache-2.0 | https://github.com/androidx/media |
 | AndroidX (core, appcompat, activity, webkit, media), Material Components for Android | both | Apache-2.0 | https://developer.android.com/jetpack/androidx |
 | Kotlin standard library, kotlinx.coroutines | both | Apache-2.0 | https://github.com/JetBrains/kotlin, https://github.com/Kotlin/kotlinx.coroutines |
 | Android NDK toolchain (r27c): only the C runtime pieces the compiler links into `libtcmirror.so` | tablet | Apache-2.0 with LLVM exception | https://developer.android.com/ndk |
