@@ -68,6 +68,10 @@ class TvActivity : Activity() {
         @VisibleForTesting var port = Wire.PORT
         /** Videos that play this long or less are previews/ads: not switched to full screen by themselves. */
         private const val MIN_AUTO_SECONDS = 45.0
+        /** 0.5.4: notes when a chosen track can't be used here (the film keeps its current track). */
+        const val CANT_SHOW_SUBS = "This subtitle track can't be shown on this TV · choose a subtitle file on the tablet instead"
+        const val CANT_PLAY_SOUND = "This sound track can't play on this TV"
+        const val SUBS_FAILED = "Subtitles off: this track can't be shown on this TV"
     }
 
     private val scope = MainScope()
@@ -234,6 +238,7 @@ class TvActivity : Activity() {
         player = TvPlayer(this, playerView, onChange = { main.post { sendStatus() } }, onError = { e -> main.post { playerFailed(e) } })
         player.onEnded = { main.post { filmEnded() } }
         player.onTracks = { main.post { filmTracks() } }
+        player.onSubtitlesFailed = { main.post { note(SUBS_FAILED); sendStatus() } }
         showIdle()
         intent?.dataString?.takeIf { Urls.isHttp(it) }?.let { open(it) }
         main.post(statusTick)
@@ -826,8 +831,15 @@ class TvActivity : Activity() {
                 note("Report sent to the tablet")
             }
             Cmd.UPDATE -> if (v == "install") startUpdate(fromTv = false) else updates.check(force = true)
-            Cmd.AUDIO -> x?.toInt()?.let { player.selectAudio(it); AppLog.i("film: audio track $it") }
-            Cmd.SUBS -> { val i = x?.toInt() ?: -1; player.selectText(i); AppLog.i("film: subtitles ${if (i < 0) "off" else "track $i"}") }
+            Cmd.AUDIO -> x?.toInt()?.let {
+                if (player.selectAudio(it)) AppLog.i("film: audio track $it")
+                else { AppLog.i("film: audio track $it refused (can't play here)"); note(CANT_PLAY_SOUND) }
+            }
+            Cmd.SUBS -> {
+                val i = x?.toInt() ?: -1
+                if (player.selectText(i)) AppLog.i("film: subtitles ${if (i < 0) "off" else "track $i"}")
+                else { AppLog.i("film: subtitle track $i refused (can't be shown here)"); note(CANT_SHOW_SUBS) }
+            }
             else -> AppLog.i("unknown command $c")
         }
         sendStatus()

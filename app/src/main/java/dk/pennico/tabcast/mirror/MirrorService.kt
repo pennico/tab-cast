@@ -129,6 +129,8 @@ class MirrorService : Service() {
     private val recovery = MirrorRecovery(LEVELS.size)
     private var encoderSince = 0L
     private var framesBefore = 0L
+    /** 0.5.4: where the next encoder's evenly spaced timeline starts, so the TV's timestamps never go back. */
+    private var nextPtsUs = 0L
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -237,18 +239,35 @@ class MirrorService : Service() {
         val l = LEVELS[level]
         val names = runCatching { l.names() }.getOrDefault(emptyList())
         if (names.isEmpty()) { AppLog.i("mirror: no ${l.label} VP8 encoder on this tablet"); return null }
-        return try { MirrorEncoder(l.w, l.h, l.bitrate, l.fps, names, h, ::send, ::encoderLost) }
+        return try { MirrorEncoder(l.w, l.h, l.bitrate, l.fps, names, h, ::send, ::encoderLost, nextPtsUs) }
         catch (ex: Exception) { AppLog.i("mirror: no ${l.label} encoder now (${ex.message})"); null }
     }
 
-    /** The first encoder that works from [recovery]'s level down; null when none (the levels are used up). */
-    private fun nextEncoder(): MirrorEncoder? {
+    /** At the start: the first encoder that works from [recovery]'s level down; null when none (the levels are used up). */
+    private fun firstEncoder(): MirrorEncoder? {
         var level = recovery.level
         while (level >= 0) {
-            makeEncoder(level)?.let { return it }
+            makeEncoder(level)?.let { recovery.made(); return it }
             level = recovery.unavailable()
         }
         return null
+    }
+
+    /**
+     * 0.5.4: after a loss, an encoder at [recovery]'s level, tried again after a pause while none can be made there
+     * (another app may hold the video chip for a moment). Gives up only when [MirrorRecovery] says so.
+     */
+    private fun encoderAgain() {
+        if (stopping) return
+        val n = makeEncoder(recovery.level)
+        if (n == null) {
+            if (recovery.unavailable() < 0) { finish("no encoder left after a loss", tell = BUSY); return }
+            h.postDelayed(::encoderAgain, recovery.retryDelayMs())
+            return
+        }
+        recovery.made()
+        use(n)
+        AppLog.i("mirror: encoder back: ${n.name} (${LEVELS[recovery.level].label}, ${n.w}x${n.h} ${n.fps} fps)")
     }
 
     /** Takes [e] into the pipeline: a new box size goes to the TV and the capture; the TV gets a key frame first. */
@@ -268,24 +287,21 @@ class MirrorService : Service() {
 
     /**
      * 0.5.2: the encoder ended under us (Android took it back for another app, or it failed). Mirroring goes
-     * on: a new encoder at the same level, or the next one down after repeated losses ([MirrorRecovery]); the
-     * projection, the VirtualDisplay and the sound carry on. None left: stop with plain words on the tablet and the TV.
+     * on with a new encoder ([MirrorRecovery]: 0.5.4, the same level after a growing pause; a lower level only if it
+     * has worked in this session); the projection, the VirtualDisplay and the sound carry on. None left: stop with
+     * plain words on the tablet and the TV.
      */
     private fun encoderLost(e: MirrorEncoder, why: String) {
         if (stopping || enc !== e) return
         enc = null
         framesBefore += e.frames
-        val level = recovery.lost(SystemClock.elapsedRealtime())
+        nextPtsUs = e.nextPtsUs
+        val level = recovery.lost(SystemClock.elapsedRealtime(), e.frames)
         AppLog.i("mirror: encoder lost: ${e.name} after ${(SystemClock.elapsedRealtime() - encoderSince) / 1000} s and ${e.frames} frames " +
             "(${(SystemClock.elapsedRealtime() - startedAt) / 1000} s into mirroring, loss ${recovery.lostTotal}): $why")
         if (level < 0) { finish("the encoder kept stopping ($why)", tell = keptStopping(why)); return }
         // A short pause: the app that wanted the chip gets it, and a dying component is gone.
-        h.postDelayed({
-            if (stopping) return@postDelayed
-            val n = nextEncoder() ?: run { finish("no encoder left after a loss", tell = BUSY); return@postDelayed }
-            use(n)
-            AppLog.i("mirror: encoder back: ${n.name} (${LEVELS[recovery.level].label}, ${n.w}x${n.h} ${n.fps} fps)")
-        }, 300)
+        h.postDelayed(::encoderAgain, recovery.retryDelayMs())
     }
 
     private fun keptStopping(why: String) =
@@ -293,7 +309,7 @@ class MirrorService : Service() {
 
     private fun begin(p: MediaProjection) {
         val (sw, sh) = screenSize()
-        val e = nextEncoder() ?: run {
+        val e = firstEncoder() ?: run {
             AppLog.i("mirror: no VP8 encoder works")
             _state.value = State(note = BUSY); finish("no encoder", tell = BUSY); return
         }

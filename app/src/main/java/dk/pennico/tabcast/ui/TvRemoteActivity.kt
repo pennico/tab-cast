@@ -371,6 +371,8 @@ class TvRemoteActivity : AppCompatActivity() {
             (if (canPick) listOf("Choose a subtitle file…") else emptyList())
         dialog(if (sound) "Sound" else "Subtitles").setItems(labels.toTypedArray()) { _, i ->
             when {
+                // 0.5.4: a track the TV marks as unplayable is explained here instead of sent (the TV refuses it too).
+                i < items.size && CANT_PLAY in items[i] -> cantPlay(sound, canPick)
                 sound -> TvLink.command(Cmd.AUDIO, i)
                 i < items.size -> TvLink.command(Cmd.SUBS, i)
                 i == items.size -> TvLink.command(Cmd.SUBS, "off")
@@ -378,6 +380,17 @@ class TvRemoteActivity : AppCompatActivity() {
                 else -> pickSubs.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream", "*/*"))
             }
         }.setNegativeButton("Cancel", null).show()
+    }
+
+    private fun cantPlay(sound: Boolean, canPick: Boolean) {
+        val d = dialog(if (sound) "Sound" else "Subtitles").setMessage(
+            if (sound) "The TV can't play this sound track (its format isn't supported there). The film keeps its current sound."
+            else "The TV can't show this subtitle track (picture subtitles such as VobSub from a DVD aren't supported there)." +
+                if (canPick) " You can choose a subtitle file (.srt) for this film instead." else "")
+        if (canPick) d.setPositiveButton("Choose a subtitle file…") { _, _ ->
+            pickSubs.launch(arrayOf("application/x-subrip", "text/*", "application/octet-stream", "*/*"))
+        }.setNegativeButton("Cancel", null) else d.setPositiveButton("OK", null)
+        d.show()
     }
 
     /** Ad blocking on the TV: for the open page's site, or for all sites (the TV keeps its own setting). */
@@ -444,3 +457,6 @@ class TvRemoteActivity : AppCompatActivity() {
         }
     }
 }
+
+/** 0.5.4: how the TV marks a track it can't play in its lists (TvPlayer.describe on the TV). */
+private const val CANT_PLAY = "can't play here"

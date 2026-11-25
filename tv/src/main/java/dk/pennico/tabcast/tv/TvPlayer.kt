@@ -16,6 +16,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.datasource.ResolvingDataSource
+import androidx.media3.exoplayer.ExoPlaybackException
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
@@ -56,6 +57,8 @@ class TvPlayer(private val ctx: Context, private val view: PlayerView, private v
     var onEnded: () -> Unit = {}
     /** 0.4.0: the film's tracks are known or changed (audio / subtitle lists for the remote). */
     var onTracks: () -> Unit = {}
+    /** 0.5.4: the chosen subtitle track failed while playing; subtitles are off and the film plays on. */
+    var onSubtitlesFailed: () -> Unit = {}
 
     /**
      * 0.4.0: a film from the tablet, read through the TV's rolling cache ([factory] routes `tabcast-film:` there),
@@ -104,20 +107,49 @@ class TvPlayer(private val ctx: Context, private val view: PlayerView, private v
     fun audioTracks(): List<Track> = groups(C.TRACK_TYPE_AUDIO).map { describe(it) }
     fun textTracks(): List<Track> = groups(C.TRACK_TYPE_TEXT).map { describe(it) }
 
-    fun selectAudio(i: Int) {
-        val p = player ?: return
-        val g = groups(C.TRACK_TYPE_AUDIO).getOrNull(i) ?: return
+    /** 0.5.4: the first track of [g] this TV can play, or -1 (e.g. VobSub subtitles, DTS sound). */
+    private fun playable(g: androidx.media3.common.Tracks.Group) = (0 until g.length).firstOrNull { g.isTrackSupported(it) } ?: -1
+
+    /**
+     * 0.5.4: false (and nothing changes) for a track this TV can't play. Forcing one used to stop the film: the
+     * player failed on it, and every retry failed again with the same track forced.
+     */
+    fun selectAudio(i: Int): Boolean {
+        val p = player ?: return false
+        val g = groups(C.TRACK_TYPE_AUDIO).getOrNull(i) ?: return false
+        val t = playable(g).takeIf { it >= 0 } ?: return false
         p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
-            .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
+            .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, t)).build()
+        return true
     }
 
-    /** [i] < 0: subtitles off. */
-    fun selectText(i: Int) {
+    /** [i] < 0: subtitles off. 0.5.4: false (and nothing changes) for a track this TV can't show, as [selectAudio]. */
+    fun selectText(i: Int): Boolean {
+        val p = player ?: return false
+        if (i < 0) { subtitlesOff(); return true }
+        val g = groups(C.TRACK_TYPE_TEXT).getOrNull(i) ?: return false
+        val t = playable(g).takeIf { it >= 0 } ?: return false
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
+            .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, t)).build()
+        return true
+    }
+
+    private fun subtitlesOff() {
         val p = player ?: return
-        val g = groups(C.TRACK_TYPE_TEXT).getOrNull(i)
-        p.trackSelectionParameters = if (g == null) p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
-            else p.trackSelectionParameters.buildUpon().setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false)
-                .setOverrideForType(TrackSelectionOverride(g.mediaTrackGroup, 0)).build()
+        p.trackSelectionParameters = p.trackSelectionParameters.buildUpon()
+            .clearOverridesOfType(C.TRACK_TYPE_TEXT).setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true).build()
+    }
+
+    /**
+     * 0.5.4: the error came from the subtitles: the text renderer failed (Media3 1.4.1 throws "Legacy decoding is
+     * disabled" for VobSub), or a runtime check failed while a subtitle track was forced. Turning subtitles off fixes it.
+     */
+    private fun subtitleFault(p: ExoPlayer, e: PlaybackException): Boolean {
+        if (p.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_TEXT)) return false
+        val x = e as? ExoPlaybackException
+        if (x?.type == ExoPlaybackException.TYPE_RENDERER && MimeTypes.isText(x.rendererFormat?.sampleMimeType)) return true
+        return e.errorCode == PlaybackException.ERROR_CODE_FAILED_RUNTIME_CHECK &&
+            p.trackSelectionParameters.overrides.keys.any { it.type == C.TRACK_TYPE_TEXT }
     }
 
     /** Why the film plays without sound here (every audio track is in a format this TV can't decode, e.g. DTS), or null. */
@@ -145,6 +177,14 @@ class TvPlayer(private val ctx: Context, private val view: PlayerView, private v
             }
             override fun onPlayerError(error: PlaybackException) {
                 AppLog.i("TV player error ${error.errorCodeName}: ${error.message} (${what.take(160)})")
+                if (player === p && subtitleFault(p, error)) {
+                    // Subtitles off and on at once: the film itself is fine.
+                    subtitlesOff()
+                    AppLog.i("TV player: the subtitle track can't be shown here; subtitles off, playing on")
+                    p.prepare(); p.playWhenReady = true
+                    onSubtitlesFailed()
+                    return
+                }
                 onError("${error.errorCodeName}${error.cause?.message?.let { ": $it" } ?: ""}".take(200))
             }
             override fun onIsPlayingChanged(isPlaying: Boolean) = onChange()

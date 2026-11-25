@@ -39,10 +39,16 @@ object Yuv {
  * after the constructor.
  *
  * [names]: the codecs to try in order (see [hardware] / [software]).
+ *
+ * 0.5.4: the encoder gets its own evenly spaced timeline (one frame time per picture, from [startPtsUs]) instead of
+ * the capture time. The capture makes a picture only when the screen changes, so on a still screen, an app switch or
+ * a turn the capture times jump by seconds, and the tablet's hardware encoder was lost right after such jumps. The TV
+ * shows each picture as it arrives, so it needs no capture times. When the encoder is lost, the log line also has
+ * the gap before the last picture and the last setting change, to tell the causes apart on the device.
  */
 class MirrorEncoder(val w: Int, val h: Int, private val bitrate: Int, val fps: Int, names: List<String>,
                     private val handler: Handler, private val onFrame: (ByteArray, Boolean, Long) -> Unit,
-                    private val onLost: (MirrorEncoder, String) -> Unit) {
+                    private val onLost: (MirrorEncoder, String) -> Unit, startPtsUs: Long = 0L) {
     val codec: MediaCodec
     val name: String
     /** Which settings the codec took: "full" (CBR + real-time), "realtime" (no CBR) or "minimal". */
@@ -61,6 +67,15 @@ class MirrorEncoder(val w: Int, val h: Int, private val bitrate: Int, val fps: I
     @Volatile var lost = false; private set
     @Volatile var frames = 0L; private set
     @Volatile var bytes = 0L; private set
+    /** The timestamp the next picture gets (see the class note); a new encoder after a loss starts here. */
+    @Volatile var nextPtsUs = startPtsUs; private set
+    private val frameUs = 1_000_000L / fps
+    /** Capture time of the last queued picture and the gap before it (µs), for the loss log line. */
+    private var lastCaptureUs = -1L
+    private var lastGapUs = 0L
+    /** The last setParameters call and when it was made (System.nanoTime), for the loss log line. */
+    private var lastParam = ""
+    private var lastParamAtNs = 0L
     private var badPictures = 0
 
     private val callback = object : MediaCodec.Callback() {
@@ -150,11 +165,13 @@ class MirrorEncoder(val w: Int, val h: Int, private val bitrate: Int, val fps: I
 
     /**
      * Converts an RGBA picture ([pw] x [ph], [rowStride] bytes per row) into a free input buffer at (x, y), black
-     * around it, and queues it. False when the encoder has no free buffer (the frame is skipped: it is still busy),
-     * or is gone.
+     * around it, and queues it at the next evenly spaced timestamp ([captureUs], when the screen made the picture, is
+     * for the log only). False when the encoder has no free buffer (the frame is skipped: it is still busy), or is
+     * gone.
      */
-    fun offer(rgba: ByteBuffer, rowStride: Int, pw: Int, ph: Int, x: Int, y: Int, ptsUs: Long): Boolean {
+    fun offer(rgba: ByteBuffer, rowStride: Int, pw: Int, ph: Int, x: Int, y: Int, captureUs: Long): Boolean {
         if (lost) return false
+        val ptsUs = nextPtsUs
         val idx = free.removeFirstOrNull() ?: return false
         val ySize = stride * slice
         val size = ySize * 3 / 2
@@ -176,13 +193,22 @@ class MirrorEncoder(val w: Int, val h: Int, private val bitrate: Int, val fps: I
             buf.clear()
             buf.put(st.duplicate().apply { clear(); limit(size) })
             codec.queueInputBuffer(idx, 0, size, ptsUs, 0)
+            nextPtsUs = ptsUs + frameUs
+            lastGapUs = if (lastCaptureUs < 0) 0 else captureUs - lastCaptureUs
+            lastCaptureUs = captureUs
             return true
         } catch (e: Exception) { lose("input: ${describe(e)}"); return false }
     }
 
-    fun requestKeyFrame() { if (!lost) runCatching { codec.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) }) } }
+    fun requestKeyFrame() = setParam("key frame") { putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0) }
 
-    fun setBitrate(bps: Int) { if (!lost) runCatching { codec.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bps) }) } }
+    fun setBitrate(bps: Int) = setParam("bitrate ${bps / 1000} kbit/s") { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, bps) }
+
+    private fun setParam(what: String, fill: Bundle.() -> Unit) {
+        if (lost) return
+        lastParam = what; lastParamAtNs = System.nanoTime()
+        runCatching { codec.setParameters(Bundle().apply(fill)) }
+    }
 
     /** Ends this encoder once: logs Android's own codec record (error code, state) and tells [onLost]. */
     private fun lose(why: String) {
@@ -191,7 +217,9 @@ class MirrorEncoder(val w: Int, val h: Int, private val bitrate: Int, val fps: I
         free.clear()
         val m = metrics()
         release(wait = false)
-        onLost(this, if (m.isEmpty()) why else "$why; codec record: $m")
+        val param = if (lastParamAtNs == 0L) "none" else "$lastParam ${(System.nanoTime() - lastParamAtNs) / 1_000_000} ms before"
+        val where = "settings $settings, gap before the last picture ${lastGapUs / 1000} ms, last setting change: $param"
+        onLost(this, if (m.isEmpty()) "$why; $where" else "$why; $where; codec record: $m")
     }
 
     /** The codec's metrics (Android 8+): error code and state when it failed, as far as the platform kept them. */
