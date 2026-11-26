@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key><string>dk.pennico.tabcast.mac</string>
+    <key>CFBundleName</key><string>Tab Cast</string>
+    <key>CFBundleDisplayName</key><string>Tab Cast</string>
+    <key>CFBundleExecutable</key><string>tabcast</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>0.6.0-dev1</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>13.0</string>
+    <key>LSUIElement</key><true/>
+    <key>NSHumanReadableCopyright</key><string>GPL-3.0-or-later</string>
+    <key>NSScreenCaptureUsageDescription</key><string>Tab Cast sends the window or screen you choose to Tab Cast TV.</string>
+    <key>NSAudioCaptureUsageDescription</key><string>Tab Cast sends the sound of what you cast to the TV and mutes it on this Mac.</string>
+    <key>NSLocalNetworkUsageDescription</key><string>Tab Cast talks to Tab Cast TV on your network.</string>
+    <key>NSAppleEventsUsageDescription</key><string>Tab Cast reads the address of the front tab of your browser to open it on the TV.</string>
+</dict>
+</plist>

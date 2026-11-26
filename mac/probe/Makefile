@@ -10,9 +10,9 @@ APP     = build/TabCastProbe.app
 
 all: $(APP)/Contents/MacOS/tabcast-probe
 
-build/tabcast-probe: probe.m link.c link.h
+build/tabcast-probe: probe.m ../src/link.c ../src/link.h
 	@mkdir -p build
-	$(CC) $(CFLAGS) -o $@ probe.m link.c $(LIBS)
+	$(CC) $(CFLAGS) -I../src -o $@ probe.m ../src/link.c $(LIBS)
 
 # Signed with the local code-signing identity when the login keychain has one (SIGN_NAME, or SIGN_ID=… on the command
 # line): macOS then ties the screen-recording permission to the certificate, so it survives rebuilds. Ad hoc otherwise
