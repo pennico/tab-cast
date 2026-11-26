@@ -41,7 +41,9 @@ From 0.5.1 Tab Cast TV updates itself from that repo (see below). One-time setup
 apps" for Tab Cast TV (the TV offers the settings page; by USB:
 `adb shell appops set dk.pennico.tabcast.tv REQUEST_INSTALL_PACKAGES allow`).
 
-**Tab Cast** (on the tablet): the APK from the GitHub release, by USB (or open it on the tablet):
+**Tab Cast** (on the tablet): the APK from the GitHub release, by USB (or open it on the tablet). From 0.5.4.1 it
+updates itself from the same repo (Settings › Updates; Android asks once to allow "Install unknown apps" for Tab Cast,
+or by USB: `adb shell appops set dk.pennico.tabcast REQUEST_INSTALL_PACKAGES allow`):
 
 ```sh
 adb install --no-streaming -r tab-cast-<version>.apk
@@ -274,24 +276,29 @@ Built-in rules today: YouTube → yt-dlp; Vimeo → yt-dlp on the player URL (Vi
 Widevine-encrypted DASH stream, and yt-dlp needs a login for vimeo.com pages but not for `player.vimeo.com`, which
 gives plain HLS); Dailymotion → browser (yt-dlp needs curl_cffi impersonation, which the Android build lacks).
 
-## Updates through F-Droid (0.3.3) and self-update (0.5.1)
+## Updates through F-Droid (0.3.3) and self-update (0.5.1, tablet 0.5.4.1)
 
-**Tab Cast TV** is published in an F-Droid repo: **https://pennico.github.io/tab-cast-fdroid/repo** (GitHub
+**Tab Cast TV** and (0.5.4.1) **Tab Cast** are published in an F-Droid repo: **https://pennico.github.io/tab-cast-fdroid/repo** (GitHub
 `pennico/tab-cast-fdroid`, Pages; APKs + signed index only). Tab Cast TV reads that repo itself
-(`tv/TvUpdates.kt`, `tv/SelfUpdate.kt`, `link/RepoIndex.kt`): at start and once a day it downloads `index-v1.jar`,
+(`tv/TvUpdates.kt`, `shared/…/update/SelfUpdate.kt`, `link/RepoIndex.kt`): at start and once a day it downloads `index-v1.jar`,
 accepts it only if its signer certificate has the pinned SHA-256 fingerprint, and compares the newest Tab Cast TV in
 it with its own version code. A newer one shows as **Update to x.y.z** (TV start screen; tablet TV remote › **Update
 TV app**; web remote banner). The update starts only when someone presses it: download with progress, SHA-256
 against the index, PackageInstaller (Android checks the release signature). After an update the TV shows its home
 screen: open Tab Cast TV again. "What's new": `tools/fdroid/whatsnew/tv-<code>.txt`.
 
+The tablet app does the same (`app/…/update/TabletUpdates.kt`): at start and once a day, a newer version shows in
+Settings › **Updates** and as a quiet notification; **Update to x.y.z** downloads, checks the SHA-256 against the
+index and hands the APK to Android's installer. "What's new": `tools/fdroid/whatsnew/app-<code>.txt`.
+
 - Release builds are signed with the release key (PKCS12 alias `tab-cast`), the index with a separate F-Droid key.
   Neither is in git: `tools/publish-fdroid.sh` reads them from `$TABCAST_KEYDIR` (base64 PKCS12 files + a
   `release.env` with the passwords) into a temp folder.
-- `tools/publish-fdroid.sh`: `build.sh --pair` (lint + tests) → release Tab Cast TV → `fdroid update` (fdroidserver
+- `tools/publish-fdroid.sh`: `build.sh --pair` (lint + tests) → release builds of both apps → `fdroid update` (fdroidserver
   from `$FDROID` or the PATH, config written to a temp folder, last 3 versions per app in `repo/`, older in
   `archive/`) → commit + push → waits until Pages serves the new `index-v1.jar`, prints the repo fingerprint.
-  `--dry-run` stops before the push (checkout in `build/fdroid-checkout/`). It refuses to publish a tablet APK.
+  `--dry-run` stops before the push (checkout in `build/fdroid-checkout/`). An APK already in the repo is never
+  replaced (a rebuild has other bytes), so publishing after a tablet-only release leaves the TV's APK as it was.
 - A release-signed app can't update a debug-signed one: switching means uninstalling once (pairing and settings are
   lost).
 - Metadata and the repo icon: `tools/fdroid/`.

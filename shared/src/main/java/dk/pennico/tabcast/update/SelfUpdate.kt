@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-package dk.pennico.tabcast.tv
+package dk.pennico.tabcast.update
 
 import android.annotation.SuppressLint
 import android.app.PendingIntent
@@ -26,8 +26,8 @@ import java.security.MessageDigest
 import javax.net.ssl.SSLException
 
 /**
- * 0.5.1: how Tab Cast TV installs its own update: download over HTTPS into the app's cache, then
- * Android's PackageInstaller. Android checks that the new APK is signed like the installed app (the release key), so
+ * 0.5.1: how Tab Cast TV installs its own update (0.5.4.1: the tablet app too): download over HTTPS into the app's
+ * cache, then Android's PackageInstaller. Android checks that the new APK is signed like the installed app (the release key), so
  * nothing else can be installed this way.
  *
  * Self-updates on Android 12+ need no OK when the app may install unknown apps and asks for no user action

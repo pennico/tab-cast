@@ -10,6 +10,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 0.5.4.1: Tab Cast updates itself from its update site (update/TabletUpdates). Android still checks that the
+         new APK is signed like the installed app, and asks the user once to allow it. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- 0.4.0 "Cast a file": list the tablet's videos (all, or on Android 14 only those picked in "Select videos"). -->
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />

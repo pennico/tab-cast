@@ -43,6 +43,7 @@ class TabCastApp : Application() {
         // 0.4.0: a film still playing on the TV from before a restart of this app gets served again.
         bg.launch { dk.pennico.tabcast.tvlink.TvLink.state.collect { st -> dk.pennico.tabcast.files.FileCast.resumeIfNeeded(this@TabCastApp, st) } }
         MainWatchdog.start()
+        dk.pennico.tabcast.update.TabletUpdates.check(this) // 0.5.4.1: at most once a day, in the background
         if (BuildConfig.DEBUG) {
             // Network or slow calls on the main thread go to logcat (adb logcat -s StrictMode).
             android.os.StrictMode.setThreadPolicy(android.os.StrictMode.ThreadPolicy.Builder()

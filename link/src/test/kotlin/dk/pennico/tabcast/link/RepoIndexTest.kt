@@ -68,4 +68,16 @@ class RepoIndexTest {
         val r = RepoIndex.latest(json, "p")!!
         assertEquals(Release(12, "b", "p_12.apk", "bb", 2, "Updates itself."), r)
     }
+
+    /** 0.5.4.1: the update site carries both apps; each finds its own newest version. */
+    @Test fun bothAppsInOneIndex() {
+        fun apk(code: Int, name: String, file: String) =
+            """{"versionCode": $code, "versionName": "$name", "apkName": "$file", "hash": "${"ab".repeat(32)}", "hashType": "sha256", "size": 1000}"""
+        val json = """{"repo": {}, "apps": [], "packages": {
+            "dk.pennico.tabcast.tv": [${apk(13, "0.5.4", "dk.pennico.tabcast.tv_13.apk")}, ${apk(12, "0.5.3", "dk.pennico.tabcast.tv_12.apk")}],
+            "dk.pennico.tabcast": [${apk(15, "0.5.4", "dk.pennico.tabcast_15.apk")}, ${apk(16, "0.5.4.1", "dk.pennico.tabcast_16.apk")}]}}"""
+        assertEquals(13L, RepoIndex.latest(json, "dk.pennico.tabcast.tv")!!.code)
+        val t = RepoIndex.latest(json, "dk.pennico.tabcast")!!
+        assertEquals(16L, t.code); assertEquals("0.5.4.1", t.name); assertEquals("dk.pennico.tabcast_16.apk", t.file)
+    }
 }

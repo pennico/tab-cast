@@ -7,6 +7,7 @@ import android.os.Looper
 import dk.pennico.tabcast.AppLog
 import dk.pennico.tabcast.link.Release
 import dk.pennico.tabcast.link.RepoIndex
+import dk.pennico.tabcast.update.SelfUpdate
 import java.io.File
 
 /**

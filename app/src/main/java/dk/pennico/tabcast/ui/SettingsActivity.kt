@@ -23,12 +23,20 @@ import dk.pennico.tabcast.BuildConfig
 import dk.pennico.tabcast.TabCastApp
 import dk.pennico.tabcast.core.SiteRules
 import dk.pennico.tabcast.core.adblock.FilterEngine
+import dk.pennico.tabcast.update.TabletUpdates
 import dk.pennico.tabcast.web.AdBlock
 import dk.pennico.tabcast.ytdlp.YtDlp
 import kotlinx.coroutines.launch
 
 class SettingsActivity : AppCompatActivity() {
+    companion object {
+        /** 0.5.4.1: opened from the update notification: scroll to Updates. */
+        const val EXTRA_UPDATES = "updates"
+    }
+
     private lateinit var ytStatus: TextView
+    private lateinit var updStatus: TextView
+    private lateinit var updBtn: com.google.android.material.button.MaterialButton
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -36,8 +44,15 @@ class SettingsActivity : AppCompatActivity() {
         ytStatus = text("yt-dlp " + (YtDlp.version(this) ?: "not unpacked yet"), 14f)
         // 0.4.0 light UI review: the everyday settings first; the technical ones folded under "Advanced".
         val advanced = column(0) { visibility = android.view.View.GONE }
+        updStatus = text("", 14f)
+        updBtn = button("Check for updates", outlined = true) { updatePressed() }
         val root = column(20) {
             addView(text("Settings", 22f, true))
+
+            // 0.5.4.1: the tablet app updates itself (no cable), from the same signed update site as Tab Cast TV.
+            addView(header("Updates"))
+            addView(updStatus)
+            addView(updBtn)
 
             addView(header("TV"))
             addView(button("TVs…", outlined = true) { startActivity(Intent(this@SettingsActivity, DevicesActivity::class.java)) })
@@ -142,7 +157,40 @@ class SettingsActivity : AppCompatActivity() {
                 AdBlock.ATTRIBUTION + "\n" +
                 "DRM services (Netflix, Prime Video, DRTV, RaiPlay…) can't be cast this way: use their TV apps.", 13f))
         }
-        setContentView(scroll(root))
+        val sc = scroll(root)
+        setContentView(sc)
+        if (intent?.getBooleanExtra(EXTRA_UPDATES, false) == true) sc.post { sc.scrollTo(0, updStatus.top) }
+        lifecycleScope.launch { TabletUpdates.state.collect { showUpdate(it) } }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        TabletUpdates.check(this) // at most once a day by itself
+    }
+
+    private fun showUpdate(s: TabletUpdates.State) {
+        val r = s.available
+        updStatus.text = s.line.ifEmpty {
+            if (r != null) "Tab Cast ${r.name} is available (this is ${BuildConfig.VERSION_NAME})." +
+                (if (r.whatsNew.isNotBlank()) "\n" + r.whatsNew else "")
+            else "Tab Cast ${BuildConfig.VERSION_NAME}. Looks for updates once a day."
+        }
+        updBtn.text = if (r != null) "Update to ${r.name}" else "Check for updates"
+        updBtn.isEnabled = !s.busy
+    }
+
+    private fun updatePressed() {
+        if (TabletUpdates.state.value.available == null) { TabletUpdates.check(this, force = true); return }
+        if (TabletUpdates.needsSetup(this)) {
+            dialog("Allow updates").setMessage("Android asks once: allow \"Install unknown apps\" for Tab Cast, then come " +
+                "back and press Update again. Android still checks that each update is signed like this app.")
+                .setPositiveButton("Open the setting") { _, _ ->
+                    runCatching { startActivity(TabletUpdates.setupIntent(this)) }
+                        .onFailure { TabletUpdates.install(this) } // no such page on this tablet: Android asks during the install
+                }.setNegativeButton("Cancel", null).show()
+            return
+        }
+        TabletUpdates.install(this)
     }
 
     private fun updateYt() {

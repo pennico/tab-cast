@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.4.1 (2026-11-26): the tablet app updates itself
+
+1. **Tab Cast (tablet) updates without a cable**, like Tab Cast TV: it reads the same signed update site at start and
+   once a day, shows a newer version in Settings › **Updates** and as a notification, and installs it when you press
+   Update (download, SHA-256 from the signed list, Android's installer, which checks the signer). Android asks once to
+   allow "Install unknown apps" for Tab Cast. The installer code is shared by both apps now (`shared/…/update/`).
+2. The update site now carries the tablet APK as well; `tools/publish-fdroid.sh` publishes both apps and never
+   replaces an APK that is already published. Tab Cast TV is unchanged (0.5.4).
+
 ## 0.5.4 (2026-11-26): subtitles that don't stop the film, more subtitle formats, steadier Mirror screen
 
 1. **A subtitle or sound track the TV can't play no longer freezes the film.** Choosing one used to force it on; the

@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Publish Tab Cast TV (release-signed) to the F-Droid repo pennico/tab-cast-fdroid (GitHub Pages:
-# https://pennico.github.io/tab-cast-fdroid/repo). See README "Updates through F-Droid".
+# Publish Tab Cast TV and (0.5.4.1) the tablet app, release-signed, to the F-Droid repo pennico/tab-cast-fdroid
+# (GitHub Pages: https://pennico.github.io/tab-cast-fdroid/repo). Both apps update themselves from it. See README
+# "Updates through F-Droid".
 #
 #   tools/publish-fdroid.sh             build + test the pair, sign the TV app, update the index, commit + push, check
 #                                       it is served
 #   tools/publish-fdroid.sh --dry-run   the same without push (repo left in build/fdroid-checkout for a look)
 #
-# Only Tab Cast TV goes to that repo. The tablet app (it bundles youtubedl-android) is published with its source on
-# GitHub Releases instead.
+# Both apps are GPL-3.0-or-later with their source on GitHub (the tablet app bundles youtubedl-android, also GPL); the
+# repo's metadata links the source. An APK whose file is already in the repo is never replaced: a rebuild of the
+# same version has other bytes (AGP writes the git SHA in), and devices may have checked the published one.
 #
 # Keys: never in git. They come from a secret store, rendered into $TABCAST_KEYDIR:
 #   tab-cast-release.p12.b64   app signing key (Tab Cast TV; PKCS12, alias tab-cast)
@@ -54,10 +56,10 @@ REPO_PW=$(val FDROID_REPO_STORE_PASSWORD)
 echo "== build + tests (debug pair: lint, unit, Robolectric) =="
 tools/build.sh --pair
 echo "== release build of Tab Cast TV =="
-./gradlew --no-daemon -q :tv:assembleRelease
+./gradlew --no-daemon -q :tv:assembleRelease :app:assembleRelease
 APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -n1)
 rm -rf dist/release; mkdir -p dist/release
-for m in tv; do       # never "app": see the note at the top
+for m in tv app; do
     ver=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' "$m/build.gradle.kts")
     code=$(sed -n 's/.*versionCode = \([0-9]*\).*/\1/p' "$m/build.gradle.kts")
     case $m in app) id=dk.pennico.tabcast ;; tv) id=dk.pennico.tabcast.tv ;; esac
@@ -69,7 +71,7 @@ for m in tv; do       # never "app": see the note at the top
     echo "$out ($ver): $("$APKSIGNER" verify --print-certs "$src" | sed -n 's/.*SHA-256 digest: //p' | head -n1)"
 done
 
-(cd dist/release && sha256sum dk.pennico.tabcast.tv_*.apk > SHA256SUMS)
+(cd dist/release && sha256sum dk.pennico.tabcast*_*.apk > SHA256SUMS)
 
 echo "== F-Droid repo =="
 git_gh() { git -c credential.helper= -c credential.helper='!gh auth git-credential' "$@"; }
@@ -77,14 +79,20 @@ if [ -d "$CHECKOUT/.git" ]; then git_gh -C "$CHECKOUT" pull -q --ff-only
 else rm -rf "$CHECKOUT"; git_gh clone -q "https://github.com/$REPO_SLUG.git" "$CHECKOUT"; fi
 work="$tmp/fdroid"; mkdir -p "$work"
 for d in repo archive metadata; do mkdir -p "$CHECKOUT/$d"; cp -a "$CHECKOUT/$d" "$work/"; done
-rm -f "$work/metadata/dk.pennico.tabcast.yml"
-cp tools/fdroid/metadata/dk.pennico.tabcast.tv.yml "$work/metadata/"
+cp tools/fdroid/metadata/dk.pennico.tabcast.tv.yml tools/fdroid/metadata/dk.pennico.tabcast.yml "$work/metadata/"
 # 0.5.1: "What's new" per version (shown by Tab Cast TV's own updater): tools/fdroid/whatsnew/tv-<versionCode>.txt.
 cl="$work/metadata/dk.pennico.tabcast.tv/en-US/changelogs"
 for f in tools/fdroid/whatsnew/tv-*.txt; do [ -e "$f" ] || continue; mkdir -p "$cl"; c=${f##*/tv-}; cp "$f" "$cl/$c"; done
+# 0.5.4.1: the tablet app's: tools/fdroid/whatsnew/app-<versionCode>.txt.
+cla="$work/metadata/dk.pennico.tabcast/en-US/changelogs"
+for f in tools/fdroid/whatsnew/app-*.txt; do [ -e "$f" ] || continue; mkdir -p "$cla"; c=${f##*/app-}; cp "$f" "$cla/$c"; done
 cp tools/fdroid/icon.png "$work/tab-cast.png"   # repo_icon is relative to the fdroid work folder
-cp dist/release/dk.pennico.tabcast.tv_*.apk "$work/repo/"
-# Only this release's two APKs are new; older ones are already in repo/ or archive/ from the checkout.
+# Only APKs that aren't published yet are added; older ones are already in repo/ or archive/ from the checkout.
+for a in dist/release/dk.pennico.tabcast*_*.apk; do
+    n=${a##*/}
+    if [ -e "$work/repo/$n" ] || [ -e "$work/archive/$n" ]; then echo "$n is already published: kept as it is"
+    else cp "$a" "$work/repo/"; echo "$n: new"; fi
+done
 cat > "$work/config.yml" <<CFG
 repo_url: $REPO_URL
 repo_name: Tab Cast
@@ -120,9 +128,6 @@ fi
 rm -rf "$CHECKOUT/repo" "$CHECKOUT/archive" "$CHECKOUT/metadata"
 cp -a "$work/repo" "$work/archive" "$work/metadata" "$CHECKOUT/"
 # Never let key material or the config reach the public repo.
-if ls "$CHECKOUT"/repo/dk.pennico.tabcast_*.apk "$CHECKOUT"/archive/dk.pennico.tabcast_*.apk >/dev/null 2>&1; then
-    echo "the tablet app (GPL-3.0 youtubedl-android inside) is in the repo: refusing to publish" >&2; exit 1
-fi
 if find "$CHECKOUT" -path "$CHECKOUT/.git" -prune -o \( -name '*.p12' -o -name '*.jks' -o -name '*.keystore' -o -name 'config.yml' -o -name '*.b64' \) -print | grep -q .; then
     echo "key material in the checkout: refusing to commit" >&2; exit 1
 fi
@@ -130,7 +135,7 @@ cp tools/fdroid/README-repo.md "$CHECKOUT/README.md"
 git -C "$CHECKOUT" add -A
 if git -C "$CHECKOUT" diff --cached --quiet; then echo "repo unchanged"; else
     vers=$(ls dist/release/ | sed 's/\.apk$//' | tr '\n' ' ')
-    git -C "$CHECKOUT" -c user.name="${FDROID_GIT_NAME:-Tab Cast publisher}" -c user.email="${FDROID_GIT_EMAIL:-noreply@invalid}" commit -q -m "Tab Cast TV release: $vers"
+    git -C "$CHECKOUT" -c user.name="${FDROID_GIT_NAME:-Tab Cast publisher}" -c user.email="${FDROID_GIT_EMAIL:-noreply@invalid}" commit -q -m "Tab Cast release: $vers"
 fi
 echo
 echo "F-Droid repo address: $REPO_URL"
