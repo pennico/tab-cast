@@ -10,6 +10,7 @@
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>13.0</string>
     <key>LSUIElement</key><true/>
+    <key>NSLocalNetworkUsageDescription</key><string>Tab Cast Probe sends this screen to Tab Cast TV on your network.</string>
     <key>NSScreenCaptureUsageDescription</key><string>Tab Cast Probe measures how light casting this screen to the TV can be.</string>
 </dict>
 </plist>

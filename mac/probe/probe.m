@@ -50,9 +50,10 @@ typedef struct {
     const char *json;
     const char *tv;
     const char *pinFile;
+    const char *report;   // --report FILE: ask the TV for its state and log ("This didn't work"), save it, exit
 } Options;
 
-static Options opt = { 0, NULL, 1, 60, 12, 1080, 20, NULL, NULL, NULL, NULL };
+static Options opt = { 0, NULL, 1, 60, 12, 1080, 20, NULL, NULL, NULL, NULL, NULL };
 
 static void usage(void) {
     fprintf(stderr, "usage: tabcast-probe --list | [--window NAME | --display] [--codec hevc|h264] [--fps N] [--mbps N]\n"
@@ -76,6 +77,7 @@ static void parse(int argc, const char **argv) {
         else if (!strcmp(a, "--json") && v) { opt.json = v; i++; }
         else if (!strcmp(a, "--tv") && v) { opt.tv = v; i++; }
         else if (!strcmp(a, "--pin-file") && v) { opt.pinFile = v; i++; }
+        else if (!strcmp(a, "--report") && v) { opt.report = v; i++; }
         else if (!strcmp(a, "--log") && v) { // an app opened with `open` has no terminal: write everything here
             if (!freopen(v, "w", stdout) || !freopen(v, "a", stderr)) exit(9);
             setvbuf(stdout, NULL, _IOLBF, 0); i++;
@@ -355,8 +357,16 @@ static int matches(SCWindow *w, const char *name) {
            [w.title localizedCaseInsensitiveContainsString:n];
 }
 
+static _Atomic int reportDone;
+
 static void onTvMessage(int type, int flags, const uint8_t *p, uint32_t len, void *ctx) {
     (void)flags; (void)ctx;
+    if (type == TC_REPORT && opt.report) {
+        FILE *f = fopen(opt.report, "wb");
+        if (f) { fwrite(p, 1, len, f); fclose(f); }
+        atomic_store(&reportDone, 1);
+        return;
+    }
     if (type == TC_KEYFRAME) atomic_store(&forceKey, 1);
     else if (type == TC_STATS) printf("TV says: %.*s\n", (int)len, (const char *)p);
 }
@@ -387,13 +397,17 @@ static void connectTv(void) {
     const char *paired = tc_hello(tv, "paired");
     if (!paired || strcmp(paired, "true")) {
         if (!opt.pinFile) { fprintf(stderr, "not paired: the TV shows a code; run again with --pin-file\n"); exit(11); }
-        printf("The TV shows a 6-digit code: write it into %s (waiting up to 3 minutes)\n", opt.pinFile);
+        printf("The TV shows a 6-digit code: write it into %s (waiting up to 5 minutes)\n", opt.pinFile);
         fflush(stdout);
         char pin[32] = "";
-        for (int i = 0; i < 180 && !*pin; i++) {
+        for (int i = 0; i < 300 && !*pin; i++) {
             FILE *f = fopen(opt.pinFile, "r");
             if (f) { if (fscanf(f, "%31s", pin) != 1) *pin = 0; fclose(f); }
-            if (!*pin) sleep(1);
+            if (!*pin) {
+                sleep(1);
+                // The TV closes a link that stays silent for 10 s: keep it alive while the code is typed.
+                if (i % 2 == 0) { uint8_t b[8]; uint64_t t = (uint64_t)(now_s() * 1e9); for (int k = 0; k < 8; k++) b[k] = (uint8_t)(t >> (56 - 8 * k)); tc_send(tv, TC_PING, 0, 0, b, 8); }
+            }
         }
         unlink(opt.pinFile);
         char tok[200];
@@ -417,6 +431,14 @@ int main(int argc, const char **argv) {
         // Capture needs the window server connection that an app gets (else CGS_REQUIRE_INIT asserts on start).
         [NSApplication sharedApplication];
         if (opt.tv && !opt.list) connectTv();
+        if (opt.report) {
+            if (!tv) { fprintf(stderr, "--report needs --tv\n"); return 2; }
+            tc_send_kv(tv, TC_CMD, "c=report\nv=Tab Cast for Mac probe");
+            for (int i = 0; i < 150 && !atomic_load(&reportDone); i++) usleep(100000);
+            printf("%s\n", atomic_load(&reportDone) ? "report saved" : "no report from the TV");
+            tc_close(tv);
+            return 0;
+        }
         SCShareableContent *sc = content();
         if (opt.list) {
             for (SCWindow *w in sc.windows) {
