@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0-dev1 (2026-11-26, Tab Cast TV preview): the Mac's screen on the TV
+
+1. **Tab Cast TV shows a Mac's screen** sent by Tab Cast for Mac (in development; `mac/probe/` for now): H.264 or HEVC
+   in full HD from the Mac's hardware encoder, decoded by the TV's hardware decoder in low-latency mode, with the
+   Mac's sound. The link's VIDEO_CONFIG takes `codec=h264|hevc` and `source=mac`; HELLO_ACK lists `codecs` (what the
+   TV decodes at 1080p60), so a sender picks HEVC only where it works. Older senders and the tablet are unchanged.
+2. `link/AnnexB.kt`: the parameter sets of a key frame go to the decoder once as codec config.
+
 ## 0.5.4.1 (2026-11-26): the tablet app updates itself
 
 1. **Tab Cast (tablet) updates without a cable**, like Tab Cast TV: it reads the same signed update site at start and

@@ -5,10 +5,12 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.MediaCodec
+import android.media.MediaCodecList
 import android.media.MediaFormat
 import android.os.SystemClock
 import android.view.Surface
 import dk.pennico.tabcast.AppLog
+import dk.pennico.tabcast.link.AnnexB
 import java.util.concurrent.LinkedBlockingDeque
 import java.util.concurrent.TimeUnit
 
@@ -18,6 +20,10 @@ import java.util.concurrent.TimeUnit
  * nothing is buffered beyond what the sound needs; the picture is held back by the sound's current delay so both
  * match (A/V by the tablet's capture timestamps). After a gap or at the start the decoder waits for a key frame and
  * asks the tablet for one ([onNeedKey]).
+ *
+ * 0.6: also H.264 and HEVC (Tab Cast for Mac: 1080p from the Mac's hardware encoder), Annex-B access units with the
+ * parameter sets in each key frame; they go to the decoder once as codec config ([AnnexB.parameterSets]). The
+ * hardware decoder is chosen when there is one, in low-latency mode.
  */
 class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> Unit = { AppLog.i(it) }) {
     private class Frame(val data: ByteArray, val key: Boolean, val ptsUs: Long)
@@ -28,6 +34,7 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
     @Volatile private var surface: Surface? = null
     @Volatile private var w = 0
     @Volatile private var h = 0
+    @Volatile private var codecName = "vp8"
     @Volatile private var rate = 48_000
     @Volatile private var channels = 2
     @Volatile var volume = 1f
@@ -40,8 +47,9 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
     private var videoThread: Thread? = null
     private var audioThread: Thread? = null
 
-    fun configureVideo(width: Int, height: Int) {
-        w = width; h = height
+    /** [codec]: vp8 (the tablet), h264 or hevc (0.6, the Mac). */
+    fun configureVideo(width: Int, height: Int, codec: String = "vp8") {
+        w = width; h = height; codecName = codec
         restartVideo()
     }
 
@@ -84,22 +92,30 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
         videoThread?.takeIf { it !== Thread.currentThread() }?.let { it.interrupt(); it.join(1500) }
         videoThread = null
         if (!running || surface == null || w <= 0) return
-        videoThread = Thread({ videoLoop(surface!!, w, h) }, "mirror-video").apply { start() }
+        videoThread = Thread({ videoLoop(surface!!, w, h, codecName) }, "mirror-video").apply { start() }
     }
 
-    private fun videoLoop(s: Surface, width: Int, height: Int) {
+    private fun videoLoop(s: Surface, width: Int, height: Int, codecId: String) {
+        val mime = mimeOf(codecId)
+        val annexB = codecId == "h264" || codecId == "hevc"
+        val format = MediaFormat.createVideoFormat(mime, width, height).apply {
+            if (android.os.Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+            // A 1080p key frame can be several hundred kB; some decoders size their input buffers too small otherwise.
+            if (annexB) setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 4 shl 20)
+        }
         val codec = try {
-            MediaCodec.createDecoderByType(MediaFormat.MIMETYPE_VIDEO_VP8).also {
-                it.configure(MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_VP8, width, height).apply {
-                    if (android.os.Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                }, s, null, 0)
+            // The hardware decoder when the TV has one for this format (the Chromecast's for H.264/HEVC).
+            val name = MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(format)
+            (if (name != null) MediaCodec.createByCodecName(name) else MediaCodec.createDecoderByType(mime)).also {
+                it.configure(format, s, null, 0)
                 it.start()
             }
-        } catch (e: Exception) { log("mirror: no VP8 decoder ($e)"); return }
+        } catch (e: Exception) { log("mirror: no $codecId decoder ($e)"); return }
         decoderName = codec.name
-        log("mirror: decoder ${codec.name} ${width}x$height")
+        log("mirror: decoder ${codec.name} ($codecId) ${width}x$height")
         val info = MediaCodec.BufferInfo()
         var waitKey = true
+        var configured = !annexB
         onNeedKey()
         try {
             while (running && !Thread.currentThread().isInterrupted) {
@@ -107,9 +123,25 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
                 if (f != null) {
                     if (waitKey && !f.key) { dropped++; continue }
                     waitKey = false
+                    if (!configured) {
+                        // H.264/HEVC: the parameter sets of the first key frame go in once as codec config.
+                        val ps = AnnexB.parameterSets(f.data, hevc = codecId == "hevc")
+                        if (ps == null) { dropped++; waitKey = true; onNeedKey(); continue }
+                        val ci = codec.dequeueInputBuffer(100_000)
+                        if (ci < 0) { dropped++; waitKey = true; onNeedKey(); continue }
+                        codec.getInputBuffer(ci)!!.apply { clear(); put(ps) }
+                        codec.queueInputBuffer(ci, 0, ps.size, 0, MediaCodec.BUFFER_FLAG_CODEC_CONFIG)
+                        configured = true
+                    }
                     val i = codec.dequeueInputBuffer(20_000)
                     if (i >= 0) {
                         val b = codec.getInputBuffer(i)!!
+                        if (f.data.size > b.capacity()) {
+                            // Too big for this decoder's buffer: skip to the next key frame.
+                            codec.queueInputBuffer(i, 0, 0, f.ptsUs, 0)
+                            log("mirror: a ${f.data.size} B frame doesn't fit the decoder's ${b.capacity()} B buffer")
+                            dropped++; waitKey = true; onNeedKey(); continue
+                        }
                         b.clear(); b.put(f.data)
                         codec.queueInputBuffer(i, 0, f.data.size, f.ptsUs, if (f.key) MediaCodec.BUFFER_FLAG_KEY_FRAME else 0)
                     } else { dropped++; waitKey = true; onNeedKey() }
@@ -159,6 +191,25 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
             runCatching { t.stop() }; t.release()
             log("mirror: sound ended after ${(SystemClock.elapsedRealtime() - started) / 1000} s")
         }
+    }
+
+    companion object {
+        fun mimeOf(codec: String): String = when (codec) {
+            "h264" -> MediaFormat.MIMETYPE_VIDEO_AVC
+            "hevc" -> MediaFormat.MIMETYPE_VIDEO_HEVC
+            else -> MediaFormat.MIMETYPE_VIDEO_VP8
+        }
+
+        /**
+         * 0.6: the mirroring codecs this TV can decode up to [w]x[h] at [fps] ("vp8,h264,hevc"), for HELLO_ACK: the
+         * Mac app sends HEVC only to a TV that lists it, else H.264.
+         */
+        fun decodable(w: Int = 1920, h: Int = 1080, fps: Int = 60): String = listOf("vp8", "h264", "hevc").filter { c ->
+            runCatching {
+                val f = MediaFormat.createVideoFormat(mimeOf(c), w, h).apply { setInteger(MediaFormat.KEY_FRAME_RATE, fps) }
+                MediaCodecList(MediaCodecList.REGULAR_CODECS).findDecoderForFormat(f) != null
+            }.getOrDefault(false)
+        }.joinToString(",")
     }
 
     fun stats(): Map<String, Any?> = mapOf("decoded" to decoded, "dropped" to dropped, "decoder" to decoderName,

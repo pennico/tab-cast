@@ -292,7 +292,7 @@ class TvActivity : Activity() {
         s = LinkServer(port, "tv", helloAck = { _ ->
             mapOf("name" to tvName(), "app" to "Tab Cast TV ${BuildConfig.VERSION_NAME}",
                 "screen" to "${resources.displayMetrics.widthPixels}x${resources.displayMetrics.heightPixels}", "acks" to 1,
-                "files" to 1, "free" to films.free(), "mirror" to 1)
+                "files" to 1, "free" to films.free(), "mirror" to 1, "codecs" to mirrorCodecs)
         }, isAuthorized = { pairing.check(it["token"]) != null }) { p ->
             if (!p.authorized) {
                 // 0.3.0: an unpaired tablet (also a 0.2 one, once) must enter the PIN shown here; nothing else counts.
@@ -375,7 +375,8 @@ class TvActivity : Activity() {
                 kv["id"]?.let { p.sendKv(Wire.ACK, "id" to it); sendStatus() }
             }
             Wire.FILE -> playFilm(kv)
-            Wire.VIDEO_CONFIG -> startMirror(kv["w"]?.toIntOrNull() ?: 960, kv["h"]?.toIntOrNull() ?: 720)
+            Wire.VIDEO_CONFIG -> startMirror(kv["w"]?.toIntOrNull() ?: 960, kv["h"]?.toIntOrNull() ?: 720,
+                kv["codec"]?.takeIf { it in setOf("vp8", "h264", "hevc") } ?: "vp8", kv["source"] == "mac")
             Wire.AUDIO_CONFIG -> mirror?.configureAudio(kv["rate"]?.toIntOrNull() ?: 48_000, kv["channels"]?.toIntOrNull() ?: 2)
             Wire.STATE -> if (kv["mirror"] == "off") {
                 stopMirror("the tablet stopped" + (kv["why"]?.let { ": $it" } ?: ""))
@@ -424,7 +425,10 @@ class TvActivity : Activity() {
         return true
     }
 
-    private fun startMirror(w: Int, h: Int) {
+    /** 0.6: the mirroring codecs this TV decodes at 1080p60, for HELLO_ACK (worked out once: it asks Android). */
+    private val mirrorCodecs: String by lazy { TvMirror.decodable() }
+
+    private fun startMirror(w: Int, h: Int, codec: String = "vp8", fromMac: Boolean = false) {
         closeFilm(save = true)
         leavePlayer(resume = false)
         exitCustomView()
@@ -436,18 +440,18 @@ class TvActivity : Activity() {
         })
         mr.volume = appVolume.toFloat()
         mirror = mr
-        // Letterbox the tablet's 4:3 picture in the TV's 16:9 screen.
+        // Letterbox the picture (the tablet's 4:3, a Mac window's own shape) in the TV's 16:9 screen.
         val sw = resources.displayMetrics.widthPixels; val sh = resources.displayMetrics.heightPixels
         val scale = minOf(sw.toDouble() / w, sh.toDouble() / h)
         mirrorView.layoutParams = FrameLayout.LayoutParams((w * scale).roundToInt(), (h * scale).roundToInt(), Gravity.CENTER)
         mirrorView.visibility = View.VISIBLE
-        mr.configureVideo(w, h)
+        mr.configureVideo(w, h, codec)
         if (mirrorView.holder.surface?.isValid == true) mr.setSurface(mirrorView.holder.surface)
         idle.visibility = View.GONE
         web.visibility = View.INVISIBLE
         mode = "mirror"
-        AppLog.i("mirror: the tablet's screen, ${w}x$h")
-        note("The tablet's screen")
+        AppLog.i("mirror: ${if (fromMac) "the Mac's" else "the tablet's"} screen, ${w}x$h $codec")
+        note(if (fromMac) "The Mac's screen" else "The tablet's screen")
         sendStatus()
     }
 

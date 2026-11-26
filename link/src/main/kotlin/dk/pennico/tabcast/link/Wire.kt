@@ -28,8 +28,14 @@ object Wire {
 
     // tablet -> TV
     const val HELLO = 1          // kv: name, app, token (0.3.0: from pairing; without a valid one only PAIR is accepted)
-    const val VIDEO_CONFIG = 2   // mirroring: kv codec (jpeg | vp8), w, h
-    const val VIDEO = 3          // mirroring: one frame (JPEG file or VP8 frame); FLAG_KEY on key frames
+    /**
+     * Mirroring: kv codec (jpeg | vp8; 0.6: h264 | hevc, only to a TV whose HELLO_ACK lists it in codecs), w, h,
+     * source (0.6, optional: mac).
+     */
+    const val VIDEO_CONFIG = 2
+    /** Mirroring: one frame (JPEG file, VP8 frame; 0.6: an H.264/HEVC Annex-B access unit with the parameter sets in
+     *  every key frame); FLAG_KEY on key frames. */
+    const val VIDEO = 3
     const val AUDIO_CONFIG = 4   // mirroring: kv codec (pcm_s16le), rate, channels
     const val AUDIO = 5          // mirroring: interleaved PCM
     const val STATE = 6          // mirroring: kv mirror=off (0.5.0: the tablet stopped mirroring)
@@ -53,7 +59,7 @@ object Wire {
     const val FILE = 20
 
     // TV -> tablet
-    const val HELLO_ACK = 101    // kv: name, app, screen, paired (true/false), acks=1 (0.3.3), files=1 + free (bytes, 0.4.0), mirror=1 (0.5.0)
+    const val HELLO_ACK = 101    // kv: name, app, screen, paired (true/false), acks=1 (0.3.3), files=1 + free (bytes, 0.4.0), mirror=1 (0.5.0), codecs (0.6: e.g. vp8,h264,hevc)
     const val KEYFRAME = 102     // mirroring: the TV needs a key frame
     const val PONG = 103
     const val STATS = 104        // mirroring: kv, logged by the tablet

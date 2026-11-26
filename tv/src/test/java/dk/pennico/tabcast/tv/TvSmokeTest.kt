@@ -140,6 +140,45 @@ class TvSmokeTest {
         c.pause().stop().destroy()
     }
 
+    /**
+     * 0.6: the Mac's screen: HELLO_ACK lists the decodable codecs (Robolectric has no decoders, so the list may be
+     * empty, but the key is there); VIDEO_CONFIG codec=hevc source=mac starts the mirror view with the Mac's note;
+     * Annex-B frames go in without stopping it (no decoder here: they are only queued and dropped).
+     */
+    @Test fun macScreenInHevc() {
+        TvActivity.port = 0
+        WebRemote.PORT_SETTING = 0
+        val c = Robolectric.buildActivity(TvActivity::class.java).setup()
+        val a = c.get()
+        TvApp.pairing.hidePin()
+        val pin = TvApp.pairing.showPin("test")!!
+        val p = LinkClient.connect("127.0.0.1", a.linkPort!!, mapOf("name" to "test Mac"))
+        assertTrue("HELLO_ACK has codecs", p.hello.containsKey("codecs"))
+        val pairRes = CopyOnWriteArrayList<Map<String, String>>()
+        p.onMessage = { m -> if (m.type == Wire.PAIR_RESULT) pairRes += m.kv() }
+        p.start()
+        p.sendKv(Wire.PAIR, "pin" to pin, "name" to "test Mac")
+        assertTrue(pump { pairRes.isNotEmpty() })
+        p.sendKv(Wire.VIDEO_CONFIG, "codec" to "hevc", "w" to 1720, "h" to 1080, "source" to "mac")
+        p.sendKv(Wire.AUDIO_CONFIG, "codec" to "pcm_s16le", "rate" to 48000, "channels" to 2)
+        assertTrue(pump { a.mode == "mirror" })
+        val texts = a.findViewById<android.view.View>(android.R.id.content).allTexts()
+        assertTrue(texts.toString(), texts.any { "The Mac's screen" in it })
+        val sc = byteArrayOf(0, 0, 0, 1)
+        val key = sc + byteArrayOf(0x40, 0x01, 1) + sc + byteArrayOf(0x42, 0x01, 2) + sc + byteArrayOf(0x44, 0x01, 3) + sc + ByteArray(3000) { 0x26 }
+        repeat(20) { i -> p.send(Wire.VIDEO, if (i % 10 == 0) key else sc + ByteArray(800) { 0x02 }, if (i % 10 == 0) Wire.FLAG_KEY else 0, i * 16_667L) }
+        pump { false.also { Thread.sleep(5) } }
+        assertEquals("mirror", a.mode)
+        // An unknown codec falls back to VP8 (an older sender) instead of failing.
+        p.sendKv(Wire.VIDEO_CONFIG, "codec" to "av9", "w" to 960, "h" to 720)
+        pump { false.also { Thread.sleep(5) } }
+        assertEquals("mirror", a.mode)
+        p.sendKv(Wire.STATE, "mirror" to "off")
+        assertTrue(pump { a.mode == "idle" })
+        p.close()
+        c.pause().stop().destroy()
+    }
+
     /** 0.5.0: the mirror view starts on VIDEO_CONFIG, takes picture and sound frames, and ends on STATE mirror=off / CLOSE. */
     @Test fun mirrorView() {
         TvActivity.port = 0

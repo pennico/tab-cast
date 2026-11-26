@@ -13,8 +13,8 @@ android {
         applicationId = "dk.pennico.tabcast.tv"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.5.4"
+        versionCode = 14
+        versionName = "0.6.0-dev1"
     }
 
     val sharedDebugKey = System.getenv("TABCAST_DEBUG_KEYSTORE")?.takeIf { it.isNotBlank() }?.let { file(it) } // see app/
