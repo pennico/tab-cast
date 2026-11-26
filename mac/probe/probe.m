@@ -16,6 +16,7 @@
 // Plain C where it can be; Objective-C only for ScreenCaptureKit, which has no C API.
 
 #import <Foundation/Foundation.h>
+#import <AppKit/AppKit.h>
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import <VideoToolbox/VideoToolbox.h>
 #import <CoreMedia/CoreMedia.h>
@@ -288,6 +289,8 @@ static int matches(SCWindow *w, const char *name) {
 int main(int argc, const char **argv) {
     @autoreleasepool {
         parse(argc, argv);
+        // Capture needs the window server connection that an app gets (else CGS_REQUIRE_INIT asserts on start).
+        [NSApplication sharedApplication];
         SCShareableContent *sc = content();
         if (opt.list) {
             for (SCWindow *w in sc.windows) {
