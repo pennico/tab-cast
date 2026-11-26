@@ -9,6 +9,11 @@
 //   tabcast-probe --list
 //   tabcast-probe [--window "Football Manager" | --display] [--codec hevc|h264] [--fps 60] [--mbps 12]
 //                 [--height 1080] [--secs 20] [--out cast.hevc] [--json result.json] [--log run.txt]
+//                 [--tv HOST [--pin-file FILE]]
+//
+// --tv: also sends the picture and sound to Tab Cast TV (0.6+, link.c). The first time the TV shows a 6-digit code;
+// write it into the --pin-file (the probe waits for it up to 3 minutes); the token is kept in
+// ~/Library/Application Support/TabCastProbe/.
 //
 // Built as a small app (Tab Cast Probe.app) so macOS's screen-recording permission is given to it alone, not to the
 // terminal it would otherwise run in: open -W build/TabCastProbe.app --args --log /path/run.txt …
@@ -27,6 +32,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include "link.h"
 
 // ------------------------------------------------------------------------------------------------ options
 
@@ -40,9 +48,11 @@ typedef struct {
     int secs;
     const char *out;
     const char *json;
+    const char *tv;
+    const char *pinFile;
 } Options;
 
-static Options opt = { 0, NULL, 1, 60, 12, 1080, 20, NULL, NULL };
+static Options opt = { 0, NULL, 1, 60, 12, 1080, 20, NULL, NULL, NULL, NULL };
 
 static void usage(void) {
     fprintf(stderr, "usage: tabcast-probe --list | [--window NAME | --display] [--codec hevc|h264] [--fps N] [--mbps N]\n"
@@ -64,6 +74,8 @@ static void parse(int argc, const char **argv) {
         else if (!strcmp(a, "--secs") && v) { opt.secs = atoi(v); i++; }
         else if (!strcmp(a, "--out") && v) { opt.out = v; i++; }
         else if (!strcmp(a, "--json") && v) { opt.json = v; i++; }
+        else if (!strcmp(a, "--tv") && v) { opt.tv = v; i++; }
+        else if (!strcmp(a, "--pin-file") && v) { opt.pinFile = v; i++; }
         else if (!strcmp(a, "--log") && v) { // an app opened with `open` has no terminal: write everything here
             if (!freopen(v, "w", stdout) || !freopen(v, "a", stderr)) exit(9);
             setvbuf(stdout, NULL, _IOLBF, 0); i++;
@@ -114,13 +126,23 @@ static struct {
 
 static FILE *outFile;
 static int stopping;
+static TcLink *tv;
+static _Atomic int forceKey;
+static _Atomic long sentVideo, sentAudio, sendFailed;
+
+/** A growing byte buffer (one per thread that fills it). */
+typedef struct { uint8_t *p; size_t n, cap; } Buf;
+static void bufAdd(Buf *b, const void *d, size_t n) {
+    if (b->n + n > b->cap) { b->cap = (b->n + n) * 2; b->p = realloc(b->p, b->cap); }
+    memcpy(b->p + b->n, d, n); b->n += n;
+}
 
 // ------------------------------------------------------------------------------------------------ Annex-B writer
 
 static const uint8_t startCode[4] = { 0, 0, 0, 1 };
 
 /** Parameter sets (VPS/SPS/PPS or SPS/PPS) of a key frame, in Annex-B form. */
-static void writeParameterSets(CMFormatDescriptionRef fd) {
+static void addParameterSets(Buf *out, CMFormatDescriptionRef fd) {
     size_t count = 0;
     int nalLen = 0;
     OSStatus s = opt.hevc
@@ -133,14 +155,18 @@ static void writeParameterSets(CMFormatDescriptionRef fd) {
         s = opt.hevc ? CMVideoFormatDescriptionGetHEVCParameterSetAtIndex(fd, i, &p, &len, NULL, NULL)
                      : CMVideoFormatDescriptionGetH264ParameterSetAtIndex(fd, i, &p, &len, NULL, NULL);
         if (s != noErr) continue;
-        fwrite(startCode, 1, 4, outFile);
-        fwrite(p, 1, len, outFile);
+        bufAdd(out, startCode, 4);
+        bufAdd(out, p, len);
     }
 }
 
-/** The frame's NAL units (4-byte big-endian lengths, as VideoToolbox writes them) with start codes instead. */
-static void writeFrame(CMSampleBufferRef sb, int key) {
-    if (key) writeParameterSets(CMSampleBufferGetFormatDescription(sb));
+/**
+ * One access unit in Annex-B form: the NAL units (VideoToolbox writes 4-byte big-endian lengths) with start codes
+ * instead, the parameter sets in front of every key frame (what Tab Cast TV and ffplay expect).
+ */
+static void annexB(Buf *out, CMSampleBufferRef sb, int key) {
+    out->n = 0;
+    if (key) addParameterSets(out, CMSampleBufferGetFormatDescription(sb));
     CMBlockBufferRef bb = CMSampleBufferGetDataBuffer(sb);
     size_t total = 0;
     char *data = NULL;
@@ -150,8 +176,8 @@ static void writeFrame(CMSampleBufferRef sb, int key) {
         uint32_t n = ((uint8_t)data[off] << 24) | ((uint8_t)data[off + 1] << 16) | ((uint8_t)data[off + 2] << 8) | (uint8_t)data[off + 3];
         off += 4;
         if (off + n > total) break;
-        fwrite(startCode, 1, 4, outFile);
-        fwrite(data + off, 1, n, outFile);
+        bufAdd(out, startCode, 4);
+        bufAdd(out, data + off, n);
         off += n;
     }
 }
@@ -178,7 +204,42 @@ static void encoded(void *ref, void *frameRef, OSStatus status, VTEncodeInfoFlag
         key = !CFDictionaryContainsKey(a, kCMSampleAttachmentKey_NotSync);
     }
     if (key) atomic_fetch_add(&st.keyframes, 1);
-    if (outFile) writeFrame(sb, key);
+    if (!outFile && !tv) return;
+    static Buf au; // the encoder calls back one frame at a time
+    annexB(&au, sb, key);
+    if (outFile) fwrite(au.p, 1, au.n, outFile);
+    if (tv) {
+        int64_t pts = (int64_t)(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sb)) * 1e6);
+        if (tc_send(tv, TC_VIDEO, key ? TC_FLAG_KEY : 0, pts, au.p, (uint32_t)au.n)) atomic_fetch_add(&sendFailed, 1);
+        else atomic_fetch_add(&sentVideo, 1);
+    }
+}
+
+/** System sound (ScreenCaptureKit: 32-bit float, usually one buffer per channel) as 16-bit interleaved PCM to the TV. */
+static void sendAudio(CMSampleBufferRef sb) {
+    const AudioStreamBasicDescription *d = CMAudioFormatDescriptionGetStreamBasicDescription(CMSampleBufferGetFormatDescription(sb));
+    if (!d || !(d->mFormatFlags & kAudioFormatFlagIsFloat) || d->mBitsPerChannel != 32) return;
+    int ch = (int)d->mChannelsPerFrame;
+    if (ch < 1 || ch > 2) return;
+    struct { AudioBufferList l; AudioBuffer more[1]; } abl;
+    CMBlockBufferRef keep = NULL;
+    if (CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sb, NULL, &abl.l, sizeof abl, NULL, NULL, 0, &keep) != noErr) return;
+    size_t frames = (size_t)CMSampleBufferGetNumSamples(sb);
+    int planar = (d->mFormatFlags & kAudioFormatFlagIsNonInterleaved) != 0;
+    static Buf pcm;
+    pcm.n = 0;
+    if (pcm.cap < frames * 2 * 2) { pcm.cap = frames * 4 * 2; pcm.p = realloc(pcm.p, pcm.cap); }
+    int16_t *o = (int16_t *)pcm.p;
+    for (size_t f = 0; f < frames; f++) for (int c = 0; c < 2; c++) {
+        int src = ch == 1 ? 0 : c;
+        float v = planar ? ((const float *)abl.l.mBuffers[src].mData)[f] : ((const float *)abl.l.mBuffers[0].mData)[f * ch + src];
+        if (v > 1) v = 1; else if (v < -1) v = -1;
+        o[f * 2 + c] = (int16_t)(v * 32767);
+    }
+    pcm.n = frames * 4;
+    CFRelease(keep);
+    int64_t pts = (int64_t)(CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sb)) * 1e6);
+    if (!tc_send(tv, TC_AUDIO, 0, pts, pcm.p, (uint32_t)pcm.n)) atomic_fetch_add(&sentAudio, 1);
 }
 
 static int makeEncoder(int w, int h) {
@@ -228,6 +289,7 @@ static int makeEncoder(int w, int h) {
     if (stopping || !CMSampleBufferIsValid(sb)) return;
     if (type == SCStreamOutputTypeAudio) {
         atomic_fetch_add(&st.audioFrames, (long)CMSampleBufferGetNumSamples(sb));
+        if (tv) sendAudio(sb);
         return;
     }
     if (type != SCStreamOutputTypeScreen) return;
@@ -244,8 +306,15 @@ static int makeEncoder(int w, int h) {
     if (!px) return;
     long n = atomic_fetch_add(&st.captured, 1);
     st.submitted[n % 1024] = now_s();
+    // The TV asked for a key frame (it joined late or lost a frame).
+    CFDictionaryRef props = NULL;
+    if (atomic_exchange(&forceKey, 0)) {
+        const void *k[] = { kVTEncodeFrameOptionKey_ForceKeyFrame }, *v[] = { kCFBooleanTrue };
+        props = CFDictionaryCreate(NULL, k, v, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+    }
     OSStatus s = VTCompressionSessionEncodeFrame(session, px, CMSampleBufferGetPresentationTimeStamp(sb), kCMTimeInvalid,
-                                                 NULL, (void *)(intptr_t)n, NULL);
+                                                 props, (void *)(intptr_t)n, NULL);
+    if (props) CFRelease(props);
     if (s != noErr) atomic_fetch_add(&st.dropped, 1);
 }
 
@@ -286,11 +355,68 @@ static int matches(SCWindow *w, const char *name) {
            [w.title localizedCaseInsensitiveContainsString:n];
 }
 
+static void onTvMessage(int type, int flags, const uint8_t *p, uint32_t len, void *ctx) {
+    (void)flags; (void)ctx;
+    if (type == TC_KEYFRAME) atomic_store(&forceKey, 1);
+    else if (type == TC_STATS) printf("TV says: %.*s\n", (int)len, (const char *)p);
+}
+
+static NSString *tokenPath(void) {
+    NSString *dir = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Application Support/TabCastProbe"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+    return [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"token-%s", opt.tv]];
+}
+
+/** Connects to the TV and pairs if needed (the code comes through --pin-file). Exits with a plain line on failure. */
+static void connectTv(void) {
+    NSString *name = [[NSHost currentHost] localizedName] ?: @"Mac";
+    NSString *tp = tokenPath();
+    NSString *token = [[NSString stringWithContentsOfFile:tp encoding:NSUTF8StringEncoding error:nil]
+                       stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    char err[300];
+    const char *host = opt.tv;
+    int port = TC_PORT;
+    char hb[256];
+    const char *colon = strrchr(opt.tv, ':');
+    if (colon && !strchr(colon + 1, ']')) { snprintf(hb, sizeof hb, "%.*s", (int)(colon - opt.tv), opt.tv); host = hb; port = atoi(colon + 1); }
+    tv = tc_connect(host, port, name.UTF8String, "Tab Cast for Mac probe 0.1", token.UTF8String, 4000, err, sizeof err);
+    if (!tv) { fprintf(stderr, "%s\n", err); exit(10); }
+    printf("TV: %s (%s), codecs %s, paired %s\n", tc_hello(tv, "name") ?: "?", tc_hello(tv, "app") ?: "?",
+           tc_hello(tv, "codecs") ?: "(none: Tab Cast TV older than 0.6)", tc_hello(tv, "paired") ?: "?");
+    fflush(stdout);
+    const char *paired = tc_hello(tv, "paired");
+    if (!paired || strcmp(paired, "true")) {
+        if (!opt.pinFile) { fprintf(stderr, "not paired: the TV shows a code; run again with --pin-file\n"); exit(11); }
+        printf("The TV shows a 6-digit code: write it into %s (waiting up to 3 minutes)\n", opt.pinFile);
+        fflush(stdout);
+        char pin[32] = "";
+        for (int i = 0; i < 180 && !*pin; i++) {
+            FILE *f = fopen(opt.pinFile, "r");
+            if (f) { if (fscanf(f, "%31s", pin) != 1) *pin = 0; fclose(f); }
+            if (!*pin) sleep(1);
+        }
+        unlink(opt.pinFile);
+        char tok[200];
+        if (!*pin || !tc_pair(tv, pin, name.UTF8String, 10000, tok, sizeof tok, err, sizeof err)) {
+            fprintf(stderr, "pairing failed: %s\n", *pin ? err : "no code came"); exit(12);
+        }
+        [[NSString stringWithUTF8String:tok] writeToFile:tp atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        chmod(tp.UTF8String, 0600);
+        printf("paired; the token is kept for next time\n");
+    }
+    const char *codecs = tc_hello(tv, "codecs");
+    if (!codecs) { fprintf(stderr, "this Tab Cast TV is older than 0.6: update it first\n"); exit(13); }
+    if (opt.hevc && !strstr(codecs, "hevc")) { printf("the TV can't decode HEVC: using H.264\n"); opt.hevc = 0; }
+    if (!opt.hevc && !strstr(codecs, "h264")) { fprintf(stderr, "the TV decodes neither HEVC nor H.264 (%s)\n", codecs); exit(14); }
+    tc_start_reader(tv, onTvMessage, NULL);
+}
+
 int main(int argc, const char **argv) {
     @autoreleasepool {
         parse(argc, argv);
         // Capture needs the window server connection that an app gets (else CGS_REQUIRE_INIT asserts on start).
         [NSApplication sharedApplication];
+        if (opt.tv && !opt.list) connectTv();
         SCShareableContent *sc = content();
         if (opt.list) {
             for (SCWindow *w in sc.windows) {
@@ -327,6 +453,12 @@ int main(int argc, const char **argv) {
         double scale = fmin(boxW / srcW, boxH / srcH);
         int w = ((int)(srcW * scale)) & ~1, h = ((int)(srcH * scale)) & ~1;
         if (!makeEncoder(w, h)) { fprintf(stderr, "no hardware %s encoder\n", opt.hevc ? "HEVC" : "H.264"); return 5; }
+        if (tv) {
+            char cfg[200];
+            snprintf(cfg, sizeof cfg, "codec=%s\nw=%d\nh=%d\nsource=mac", opt.hevc ? "hevc" : "h264", w, h);
+            tc_send_kv(tv, TC_VIDEO_CONFIG, cfg);
+            tc_send_kv(tv, TC_AUDIO_CONFIG, "codec=pcm_s16le\nrate=48000\nchannels=2");
+        }
 
         SCStreamConfiguration *cfg = [[SCStreamConfiguration alloc] init];
         cfg.width = w; cfg.height = h;
@@ -366,10 +498,17 @@ int main(int argc, const char **argv) {
         long lastEnc = 0; long long lastBytes = 0; double lastT = t0;
         for (int s = 1; s <= opt.secs; s++) {
             [NSThread sleepForTimeInterval:1.0];
+            if (tv) {
+                if (!tc_alive(tv)) { printf("%3d s: the link to the TV is gone\n", s); break; }
+                if (s % 2 == 0) { uint8_t b[8]; uint64_t t = (uint64_t)(now_s() * 1e9); for (int i = 0; i < 8; i++) b[i] = (uint8_t)(t >> (56 - 8 * i)); tc_send(tv, TC_PING, 0, 0, b, 8); }
+            }
             if (s % 5 == 0 || s == opt.secs) {
                 double t = now_s();
                 long e = atomic_load(&st.encoded); long long b = atomic_load(&st.bytes);
-                printf("%3d s: %5.1f fps encoded, %5.1f Mbit/s\n", s, (e - lastEnc) / (t - lastT), (b - lastBytes) * 8 / 1e6 / (t - lastT));
+                printf("%3d s: %5.1f fps encoded, %5.1f Mbit/s", s, (e - lastEnc) / (t - lastT), (b - lastBytes) * 8 / 1e6 / (t - lastT));
+                if (tv) printf(", to the TV: %ld frames, %ld sound chunks, %ld failed, round trip %.1f ms", atomic_load(&sentVideo),
+                               atomic_load(&sentAudio), atomic_load(&sendFailed), tc_rtt_ms(tv));
+                printf("\n");
                 fflush(stdout);
                 lastEnc = e; lastBytes = b; lastT = t;
             }
@@ -383,6 +522,8 @@ int main(int argc, const char **argv) {
         dispatch_semaphore_wait(stopped, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
         VTCompressionSessionCompleteFrames(session, kCMTimeInvalid);
         if (outFile) fclose(outFile);
+        double rtt = tv ? tc_rtt_ms(tv) : -1;
+        if (tv) { tc_send_kv(tv, TC_STATE, "mirror=off"); tc_close(tv); }
 
         double secs = t1 - t0;
         int ncpu = (int)[NSProcessInfo processInfo].activeProcessorCount;
@@ -401,11 +542,12 @@ int main(int argc, const char **argv) {
             " \"captured_fps\": %.1f, \"encoded_fps\": %.1f, \"idle_frames\": %ld, \"dropped\": %ld, \"keyframes\": %ld,\n"
             " \"mbit_per_s\": %.2f, \"encode_ms_avg\": %.1f, \"encode_ms_p95\": %.1f, \"encode_ms_max\": %.1f,\n"
             " \"cpu_this_process_pct_of_one_core\": %.1f, \"cpu_whole_mac_pct\": %.1f, \"cores\": %d,\n"
-            " \"audio_khz_received\": %.1f}\n",
+            " \"audio_khz_received\": %.1f, \"tv_frames_sent\": %ld, \"tv_send_failed\": %ld, \"tv_round_trip_ms\": %.1f}\n",
             what, w, h, opt.hevc ? "hevc" : "h264", encoderName, lowLatency ? "true" : "false", opt.fps, opt.mbps, secs,
             atomic_load(&st.captured) / secs, atomic_load(&st.encoded) / secs, atomic_load(&st.idle), atomic_load(&st.dropped),
             atomic_load(&st.keyframes), atomic_load(&st.bytes) * 8 / 1e6 / secs, avg * 1000, p95 * 1000, mx * 1000,
-            procPct, hostPct, ncpu, atomic_load(&st.audioFrames) / secs / 1000.0);
+            procPct, hostPct, ncpu, atomic_load(&st.audioFrames) / secs / 1000.0, atomic_load(&sentVideo),
+            atomic_load(&sendFailed), rtt);
         fputs(json, stdout);
         if (opt.json) { FILE *f = fopen(opt.json, "w"); if (f) { fputs(json, f); fclose(f); } }
         return 0;
