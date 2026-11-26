@@ -9,7 +9,12 @@
 //   tabcast-probe --list
 //   tabcast-probe [--window "Football Manager" | --display] [--codec hevc|h264] [--fps 60] [--mbps 12]
 //                 [--height 1080] [--secs 20] [--out cast.hevc] [--json result.json] [--log run.txt]
-//                 [--tv HOST [--pin-file FILE]]
+//                 [--tv HOST [--pin-file FILE]] [--virtual] [--mute-mac]
+//
+// --virtual (probe 2): creates a virtual 1920x1080 display ("Tab Cast TV", CGVirtualDisplay, an undocumented macOS API)
+// and casts it: macOS keeps drawing what is on it, so the Mac's own screen stays free. --mute-mac: mutes the Mac's
+// output while casting (restored at the end); the result reports the captured sound's level to show whether the
+// capture still has sound then.
 //
 // --tv: also sends the picture and sound to Tab Cast TV (0.6+, link.c). The first time the TV shows a 6-digit code;
 // write it into the --pin-file (the probe waits for it up to 3 minutes); the token is kept in
@@ -25,6 +30,33 @@
 #import <ScreenCaptureKit/ScreenCaptureKit.h>
 #import <VideoToolbox/VideoToolbox.h>
 #import <CoreMedia/CoreMedia.h>
+#import <CoreAudio/CoreAudio.h>
+
+// CGVirtualDisplay (CoreGraphics, undocumented; the same calls as BetterDisplay/DeskPad/Chromium's tests). Classes are
+// looked up at run time, so the probe still runs (and says so) where they are missing.
+@interface CGVirtualDisplayDescriptor : NSObject
+@property(retain, nonatomic) dispatch_queue_t queue;
+@property(retain, nonatomic) NSString *name;
+@property(nonatomic) unsigned int maxPixelsHigh;
+@property(nonatomic) unsigned int maxPixelsWide;
+@property(nonatomic) CGSize sizeInMillimeters;
+@property(nonatomic) unsigned int serialNum;
+@property(nonatomic) unsigned int productID;
+@property(nonatomic) unsigned int vendorID;
+@property(copy, nonatomic) void (^terminationHandler)(id, id);
+@end
+@interface CGVirtualDisplayMode : NSObject
+- (instancetype)initWithWidth:(unsigned int)width height:(unsigned int)height refreshRate:(double)refreshRate;
+@end
+@interface CGVirtualDisplaySettings : NSObject
+@property(retain, nonatomic) NSArray *modes;
+@property(nonatomic) unsigned int hiDPI;
+@end
+@interface CGVirtualDisplay : NSObject
+- (instancetype)initWithDescriptor:(CGVirtualDisplayDescriptor *)descriptor;
+- (BOOL)applySettings:(CGVirtualDisplaySettings *)settings;
+@property(readonly, nonatomic) unsigned int displayID;
+@end
 #include <mach/mach.h>
 #include <mach/mach_time.h>
 #include <sys/resource.h>
@@ -51,9 +83,11 @@ typedef struct {
     const char *tv;
     const char *pinFile;
     const char *report;   // --report FILE: ask the TV for its state and log ("This didn't work"), save it, exit
+    int virtualDisplay;
+    int muteMac;
 } Options;
 
-static Options opt = { 0, NULL, 1, 60, 12, 1080, 20, NULL, NULL, NULL, NULL, NULL };
+static Options opt = { 0, NULL, 1, 60, 12, 1080, 20, NULL, NULL, NULL, NULL, NULL, 0, 0 };
 
 static void usage(void) {
     fprintf(stderr, "usage: tabcast-probe --list | [--window NAME | --display] [--codec hevc|h264] [--fps N] [--mbps N]\n"
@@ -78,6 +112,8 @@ static void parse(int argc, const char **argv) {
         else if (!strcmp(a, "--tv") && v) { opt.tv = v; i++; }
         else if (!strcmp(a, "--pin-file") && v) { opt.pinFile = v; i++; }
         else if (!strcmp(a, "--report") && v) { opt.report = v; i++; }
+        else if (!strcmp(a, "--virtual")) opt.virtualDisplay = 1;
+        else if (!strcmp(a, "--mute-mac")) opt.muteMac = 1;
         else if (!strcmp(a, "--log") && v) { // an app opened with `open` has no terminal: write everything here
             if (!freopen(v, "w", stdout) || !freopen(v, "a", stderr)) exit(9);
             setvbuf(stdout, NULL, _IOLBF, 0); i++;
@@ -129,6 +165,9 @@ static struct {
 static FILE *outFile;
 static int stopping;
 static TcLink *tv;
+// Captured sound level (written only on the audio queue, read after the capture stopped).
+static double audioSumSq, audioPeak;
+static long long audioSamples;
 static _Atomic int forceKey;
 static _Atomic long sentVideo, sentAudio, sendFailed;
 
@@ -282,6 +321,75 @@ static int makeEncoder(int w, int h) {
 
 // ------------------------------------------------------------------------------------------------ capture
 
+/** Adds the buffer's float samples to the level statistics. */
+static void measureAudio(CMSampleBufferRef sb) {
+    const AudioStreamBasicDescription *d = CMAudioFormatDescriptionGetStreamBasicDescription(CMSampleBufferGetFormatDescription(sb));
+    if (!d || !(d->mFormatFlags & kAudioFormatFlagIsFloat) || d->mBitsPerChannel != 32) return;
+    struct { AudioBufferList l; AudioBuffer more[1]; } abl;
+    CMBlockBufferRef keep = NULL;
+    if (CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(sb, NULL, &abl.l, sizeof abl, NULL, NULL, 0, &keep) != noErr) return;
+    for (UInt32 b = 0; b < abl.l.mNumberBuffers; b++) {
+        const float *f = abl.l.mBuffers[b].mData;
+        size_t n = abl.l.mBuffers[b].mDataByteSize / sizeof(float);
+        for (size_t i = 0; i < n; i++) { double v = f[i]; audioSumSq += v * v; if (fabs(v) > audioPeak) audioPeak = fabs(v); }
+        audioSamples += (long long)n;
+    }
+    CFRelease(keep);
+}
+
+// ------------------------------------------------------------------------------------------------ the Mac's own output
+
+static AudioDeviceID outDev;
+static UInt32 outMuteWas;
+static int outMuted;
+
+/** Mutes the default output (the Mac's speakers or headphones); 1 when it worked. */
+static int muteMacOutput(void) {
+    AudioObjectPropertyAddress a = { kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMain };
+    UInt32 sz = sizeof outDev;
+    if (AudioObjectGetPropertyData(kAudioObjectSystemObject, &a, 0, NULL, &sz, &outDev) != noErr) return 0;
+    AudioObjectPropertyAddress m = { kAudioDevicePropertyMute, kAudioDevicePropertyScopeOutput, kAudioObjectPropertyElementMain };
+    sz = sizeof outMuteWas;
+    if (AudioObjectGetPropertyData(outDev, &m, 0, NULL, &sz, &outMuteWas) != noErr) return 0;
+    UInt32 on = 1;
+    if (AudioObjectSetPropertyData(outDev, &m, 0, NULL, sizeof on, &on) != noErr) return 0;
+    outMuted = 1;
+    return 1;
+}
+
+static void restoreMacOutput(void) {
+    if (!outMuted) return;
+    AudioObjectPropertyAddress m = { kAudioDevicePropertyMute, kAudioDevicePropertyScopeOutput, kAudioObjectPropertyElementMain };
+    AudioObjectSetPropertyData(outDev, &m, 0, NULL, sizeof outMuteWas, &outMuteWas);
+    outMuted = 0;
+}
+
+// ------------------------------------------------------------------------------------------------ virtual display
+
+static CGVirtualDisplay *virtualDisplay; // kept while casting: the display goes away when released
+
+/** A 1920x1080 60 Hz display named "Tab Cast TV"; its id, or 0 when macOS doesn't offer the API. */
+static CGDirectDisplayID makeVirtualDisplay(void) {
+    Class D = NSClassFromString(@"CGVirtualDisplayDescriptor"), V = NSClassFromString(@"CGVirtualDisplay"),
+          S = NSClassFromString(@"CGVirtualDisplaySettings"), M = NSClassFromString(@"CGVirtualDisplayMode");
+    if (!D || !V || !S || !M) return 0;
+    CGVirtualDisplayDescriptor *d = [[D alloc] init];
+    d.queue = dispatch_get_main_queue();
+    d.name = @"Tab Cast TV";
+    d.maxPixelsWide = 1920; d.maxPixelsHigh = 1080;
+    d.sizeInMillimeters = CGSizeMake(1210, 680); // a 55" TV: macOS then draws at a normal size
+    d.vendorID = 0x7463; d.productID = 0x0006; d.serialNum = 1;
+    d.terminationHandler = ^(id a, id b) { (void)a; (void)b; };
+    CGVirtualDisplay *v = [[V alloc] initWithDescriptor:d];
+    if (!v) return 0;
+    CGVirtualDisplaySettings *st2 = [[S alloc] init];
+    st2.hiDPI = 0;
+    st2.modes = @[ [[M alloc] initWithWidth:1920 height:1080 refreshRate:60] ];
+    if (![v applySettings:st2]) return 0;
+    virtualDisplay = v;
+    return v.displayID;
+}
+
 @interface Sink : NSObject <SCStreamOutput, SCStreamDelegate>
 @end
 
@@ -291,6 +399,7 @@ static int makeEncoder(int w, int h) {
     if (stopping || !CMSampleBufferIsValid(sb)) return;
     if (type == SCStreamOutputTypeAudio) {
         atomic_fetch_add(&st.audioFrames, (long)CMSampleBufferGetNumSamples(sb));
+        measureAudio(sb);
         if (tv) sendAudio(sb);
         return;
     }
@@ -454,7 +563,21 @@ int main(int argc, const char **argv) {
         SCContentFilter *filter = nil;
         double srcW, srcH;
         char what[300];
-        if (opt.window) {
+        if (opt.virtualDisplay) {
+            CGDirectDisplayID vid = makeVirtualDisplay();
+            if (!vid) { fprintf(stderr, "this Mac doesn't offer virtual displays (CGVirtualDisplay)\n"); return 15; }
+            printf("virtual display \"Tab Cast TV\" made (id %u): move a window onto it (right of the main screen)\n", vid);
+            fflush(stdout);
+            SCDisplay *vd = nil;
+            for (int i = 0; i < 50 && !vd; i++) { // it takes a moment to appear
+                [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+                for (SCDisplay *d in content().displays) if (d.displayID == vid) vd = d;
+            }
+            if (!vd) { fprintf(stderr, "the virtual display didn't appear for capture\n"); return 16; }
+            filter = [[SCContentFilter alloc] initWithDisplay:vd excludingWindows:@[]];
+            srcW = vd.width; srcH = vd.height;
+            snprintf(what, sizeof what, "virtual display %u", vid);
+        } else if (opt.window) {
             SCWindow *best = nil;
             for (SCWindow *w in sc.windows)
                 if (w.windowLayer == 0 && matches(w, opt.window) &&
@@ -510,6 +633,7 @@ int main(int argc, const char **argv) {
         dispatch_semaphore_wait(started, DISPATCH_TIME_FOREVER);
         if (startErr) { fprintf(stderr, "capture didn't start: %s\n", startErr.localizedDescription.UTF8String); return 8; }
 
+        if (opt.muteMac) printf("%s\n", muteMacOutput() ? "the Mac's own output is muted while casting" : "couldn't mute the Mac's output");
         printf("capturing %s (%.0fx%.0f) -> %dx%d %s at up to %d fps, %d Mbit/s, encoder %s%s\n", what, srcW, srcH, w, h,
                opt.hevc ? "HEVC" : "H.264", opt.fps, opt.mbps, encoderName, lowLatency ? " (low-latency rate control)" : "");
         fflush(stdout);
@@ -519,7 +643,7 @@ int main(int argc, const char **argv) {
         host_ticks(&hb0, &ht0);
         long lastEnc = 0; long long lastBytes = 0; double lastT = t0;
         for (int s = 1; s <= opt.secs; s++) {
-            [NSThread sleepForTimeInterval:1.0];
+            [[NSRunLoop mainRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:1.0]];
             if (tv) {
                 if (!tc_alive(tv)) { printf("%3d s: the link to the TV is gone\n", s); break; }
                 if (s % 2 == 0) { uint8_t b[8]; uint64_t t = (uint64_t)(now_s() * 1e9); for (int i = 0; i < 8; i++) b[i] = (uint8_t)(t >> (56 - 8 * i)); tc_send(tv, TC_PING, 0, 0, b, 8); }
@@ -544,7 +668,10 @@ int main(int argc, const char **argv) {
         dispatch_semaphore_wait(stopped, dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC));
         VTCompressionSessionCompleteFrames(session, kCMTimeInvalid);
         if (outFile) fclose(outFile);
+        restoreMacOutput();
         double rtt = tv ? tc_rtt_ms(tv) : -1;
+        double rmsDb = audioSamples ? 10 * log10(audioSumSq / (double)audioSamples + 1e-12) : -120;
+        double peakDb = audioPeak > 0 ? 20 * log10(audioPeak) : -120;
         if (tv) { tc_send_kv(tv, TC_STATE, "mirror=off"); tc_close(tv); }
 
         double secs = t1 - t0;
@@ -564,12 +691,12 @@ int main(int argc, const char **argv) {
             " \"captured_fps\": %.1f, \"encoded_fps\": %.1f, \"idle_frames\": %ld, \"dropped\": %ld, \"keyframes\": %ld,\n"
             " \"mbit_per_s\": %.2f, \"encode_ms_avg\": %.1f, \"encode_ms_p95\": %.1f, \"encode_ms_max\": %.1f,\n"
             " \"cpu_this_process_pct_of_one_core\": %.1f, \"cpu_whole_mac_pct\": %.1f, \"cores\": %d,\n"
-            " \"audio_khz_received\": %.1f, \"tv_frames_sent\": %ld, \"tv_send_failed\": %ld, \"tv_round_trip_ms\": %.1f}\n",
+            " \"audio_khz_received\": %.1f, \"tv_frames_sent\": %ld, \"tv_send_failed\": %ld, \"tv_round_trip_ms\": %.1f,\n \"audio_rms_db\": %.1f, \"audio_peak_db\": %.1f, \"mac_muted\": %s}\n",
             what, w, h, opt.hevc ? "hevc" : "h264", encoderName, lowLatency ? "true" : "false", opt.fps, opt.mbps, secs,
             atomic_load(&st.captured) / secs, atomic_load(&st.encoded) / secs, atomic_load(&st.idle), atomic_load(&st.dropped),
             atomic_load(&st.keyframes), atomic_load(&st.bytes) * 8 / 1e6 / secs, avg * 1000, p95 * 1000, mx * 1000,
             procPct, hostPct, ncpu, atomic_load(&st.audioFrames) / secs / 1000.0, atomic_load(&sentVideo),
-            atomic_load(&sendFailed), rtt);
+            atomic_load(&sendFailed), rtt, rmsDb, peakDb, opt.muteMac ? "true" : "false");
         fputs(json, stdout);
         if (opt.json) { FILE *f = fopen(opt.json, "w"); if (f) { fputs(json, f); fclose(f); } }
         return 0;

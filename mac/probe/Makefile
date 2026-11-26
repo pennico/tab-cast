@@ -4,7 +4,7 @@
 CC      = clang
 CFLAGS  = -O2 -Wall -Wextra -fobjc-arc -arch arm64 -arch x86_64 -mmacosx-version-min=13.0
 LIBS    = -framework Foundation -framework AppKit -framework ScreenCaptureKit -framework VideoToolbox -framework CoreMedia \
-          -framework CoreVideo -framework CoreGraphics
+          -framework CoreVideo -framework CoreGraphics -framework CoreAudio
 
 APP     = build/TabCastProbe.app
 
