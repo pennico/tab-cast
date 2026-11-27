@@ -49,7 +49,7 @@ dist: build/app.stamp
 	@rm -rf build/dist && mkdir -p build/dist
 	codesign --verify --strict "$(APP)"
 	ditto -c -k --sequesterRsrc --keepParent "$(APP)" "build/dist/Tab Cast for Mac $(VERSION).zip"
-	cp dist/INSTALL.txt "build/dist/Install Tab Cast for Mac.txt"
+	cp packaging/INSTALL.txt "build/dist/Install Tab Cast for Mac.txt"
 	@echo "build/dist: $$(ls build/dist | tr '\n' ' ')"
 
 clean:

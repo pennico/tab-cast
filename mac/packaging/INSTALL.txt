@@ -1,0 +1,35 @@
+Tab Cast for Mac: installing it on your Mac
+===========================================
+
+Tab Cast for Mac sends a window, the whole screen, or a second screen of your Mac (picture and sound) to a TV that runs
+Tab Cast TV. It works on Apple silicon and Intel Macs with macOS 13 or later.
+
+1. Unzip "Tab Cast for Mac ….zip" (double-click it) and drag "Tab Cast" into the Applications folder.
+
+2. Open it the first time:
+   - Double-click "Tab Cast" in Applications. macOS says it can't check the app (it isn't from the App Store and
+     isn't notarized by Apple). Click Done (or Cancel), do not move it to the Bin.
+   - Open System Settings › Privacy & Security, scroll down to "Tab Cast was blocked…" and click Open Anyway, then
+     Open. macOS asks this only once. (On macOS 13 or 14: right-click "Tab Cast" › Open › Open also works.)
+   - A TV icon appears in the menu bar at the top right (there is no Dock icon).
+
+3. Check this Mac (once, about 3 seconds):
+   TV icon › Check This Mac for Casting… The result is saved in Downloads as "Tab Cast Mac check ….txt" and
+   says the best quality this Mac can send. Send that file back if you were asked for it. It holds no names,
+   serial numbers or addresses.
+
+4. Connect to the TV (the Mac must be on the same Wi-Fi as the TV, with Tab Cast TV open on it):
+   TV icon › Add the TV… and type the TV's address as Tab Cast TV's start screen shows it. Then type the 6-digit code the TV shows.
+   If the TV shows no code, choose "Pair a device" on the TV.
+
+5. Cast:
+   - Use the TV as a Second Screen: the TV becomes a screen of its own, right of the Mac's. Put the game on it with
+     TV icon › Move a Window to the TV. The Mac's own screen stays free.
+   - Cast a Window / Cast the Whole Screen: the TV shows exactly that.
+   macOS asks once for Screen & System Audio Recording, and for Accessibility the first time you move a window.
+   Allow them, then choose the menu item again.
+
+6. Stop: TV icon › Stop Casting.
+
+The game's sound plays on the TV and the Mac stays silent while it does (macOS 14.2 or later; on older macOS the Mac
+plays it too: turn the Mac's volume down).
