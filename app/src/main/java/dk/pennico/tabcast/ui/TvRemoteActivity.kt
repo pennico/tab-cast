@@ -84,6 +84,7 @@ class TvRemoteActivity : AppCompatActivity() {
     }
     /** 0.5.1: "Update TV app to x.y.z" when the TV says its repo has a newer Tab Cast TV. */
     private lateinit var tvUpdate: com.google.android.material.button.MaterialButton
+    private var tvNewer = ""
     private lateinit var filmHeld: TextView
     private lateinit var soundBtn: View
     private lateinit var subsBtn: View
@@ -127,7 +128,11 @@ class TvRemoteActivity : AppCompatActivity() {
             visibility = View.GONE
         }
 
-        tvUpdate = button("Update TV app", outlined = true) { TvLink.cmd(Cmd.UPDATE, "install") }.apply { visibility = View.GONE }
+        // 0.6: always there while connected: "Check the TV for updates" (older TVs answer it too), or "Update TV app to
+        // x.y.z" once the TV knows one.
+        tvUpdate = button("Check the TV for updates", outlined = true) {
+            if (tvNewer.isNotEmpty()) TvLink.cmd(Cmd.UPDATE, "install") else TvLink.cmd(Cmd.UPDATE)
+        }.apply { visibility = View.GONE }
         val info = column(0) {
             addView(tvUpdate, matchWrap())
             addView(head, matchWrap())
@@ -255,9 +260,14 @@ class TvRemoteActivity : AppCompatActivity() {
         filmBox.visibility = if (film) View.VISIBLE else View.GONE
         val newer = s.status[Status.UPDATE].orEmpty()
         val upLine = s.status[Status.UPDATE_STATE].orEmpty()
-        tvUpdate.visibility = if (s.connected && (newer.isNotEmpty() || upLine.isNotEmpty())) View.VISIBLE else View.GONE
-        tvUpdate.text = upLine.ifEmpty { "Update TV app to $newer" }
-        tvUpdate.isEnabled = newer.isNotEmpty()
+        tvNewer = newer
+        tvUpdate.visibility = if (s.connected) View.VISIBLE else View.GONE
+        tvUpdate.text = when {
+            newer.isNotEmpty() && upLine.isEmpty() -> "Update TV app to $newer"
+            upLine.isNotEmpty() -> upLine
+            else -> "Check the TV for updates"
+        }
+        tvUpdate.isEnabled = newer.isNotEmpty() || !upLine.startsWith("Looking for")
         for (v in listOf(pageGrid, hint)) v.visibility = if (film) View.GONE else View.VISIBLE
         soundBtn.visibility = if (mirror) View.GONE else View.VISIBLE
         subsBtn.visibility = if (mirror) View.GONE else View.VISIBLE

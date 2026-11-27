@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0-dev2 (2026-11-28, preview of both apps): sound sooner, "Check for updates" everywhere
+
+1. **A mirrored screen's sound and picture come out ~0.1 s sooner.** The TV's sound buffer (0.1 s) filled after a
+   network burst, or when the sender's clock ran a little fast, and never emptied; the picture waits for the sound,
+   so everything stayed ~90 ms late. Once the sound plays, Tab Cast TV now skips a 20 ms piece when more than 50 ms
+   waits (never below what the TV's sound hardware needs), and on Android 12+ it starts after ~40 ms instead of a
+   full buffer. The TV log's mirror stats show `soundSkipped`.
+2. **"Check for updates" in both apps**: always on Tab Cast TV's start screen (it becomes "Update to x.y.z" when
+   there is one) and in the browser remote; in the tablet's main menu (opens Settings › Updates and checks), and
+   "Check the TV for updates" in the tablet's TV remote (older TVs answer it too).
+3. **Tab Cast for Mac** (`mac/`, menu bar, macOS 13+, Apple silicon and Intel; built from source for now):
+   Send This Tab to the TV, Cast a Window, Cast the Whole Screen, and **Use the TV as a Second Screen** (a 1920x1080
+   screen of its own, right of the Mac's; Move a Window to the TV). The cast app's sound plays on the TV and is muted
+   on the Mac at its source (macOS 14.2+). **Check This Mac for Casting** saves a short report (model, macOS,
+   hardware encoders with a 1080p speed test, what works) to Downloads; `make dist` zips the app with the steps to
+   open it on another Mac.
+
 ## 0.6.0-dev1 (2026-11-26, Tab Cast TV preview): the Mac's screen on the TV
 
 1. **Tab Cast TV shows a Mac's screen** sent by Tab Cast for Mac (in development; `mac/probe/` for now): H.264 or HEVC

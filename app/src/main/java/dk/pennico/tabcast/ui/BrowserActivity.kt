@@ -373,6 +373,7 @@ class BrowserActivity : AppCompatActivity() {
         m.add(0, 6, 0, "Remote")
         m.add(0, 7, 0, "Share page link")
         m.add(0, 8, 0, "Settings")
+        m.add(0, 13, 0, "Check for updates")
         p.setOnMenuItemClickListener {
             when (it.itemId) {
                 1 -> home()
@@ -392,6 +393,8 @@ class BrowserActivity : AppCompatActivity() {
                     ?: Toast.makeText(this, "Open a page first", Toast.LENGTH_SHORT).show()
                 11 -> TvFlow.remote(this)
                 12 -> web.url?.takeIf { u -> Urls.isHttp(u) }?.let { u -> adsForSite(u) }
+                13 -> startActivity(Intent(this, SettingsActivity::class.java)
+                    .putExtra(SettingsActivity.EXTRA_UPDATES, true).putExtra(SettingsActivity.EXTRA_CHECK, true))
             }
             true
         }

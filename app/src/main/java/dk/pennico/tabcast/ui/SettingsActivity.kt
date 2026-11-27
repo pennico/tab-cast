@@ -32,6 +32,8 @@ class SettingsActivity : AppCompatActivity() {
     companion object {
         /** 0.5.4.1: opened from the update notification: scroll to Updates. */
         const val EXTRA_UPDATES = "updates"
+        /** 0.6: with EXTRA_UPDATES, also look for an update now (the main menu's "Check for updates"). */
+        const val EXTRA_CHECK = "check"
     }
 
     private lateinit var ytStatus: TextView
@@ -161,6 +163,8 @@ class SettingsActivity : AppCompatActivity() {
         setContentView(sc)
         if (intent?.getBooleanExtra(EXTRA_UPDATES, false) == true) sc.post { sc.scrollTo(0, updStatus.top) }
         lifecycleScope.launch { TabletUpdates.state.collect { showUpdate(it) } }
+        if (intent?.getBooleanExtra(EXTRA_CHECK, false) == true && TabletUpdates.state.value.available == null)
+            TabletUpdates.check(this, force = true)
     }
 
     override fun onResume() {

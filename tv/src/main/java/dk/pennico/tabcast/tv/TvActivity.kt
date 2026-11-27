@@ -195,7 +195,8 @@ class TvActivity : Activity() {
             visibility = View.GONE
         }
         updates = TvUpdates(this) { updateChanged() }
-        updateButton = tvButton("Update") { askUpdate() }.apply { visibility = View.GONE }
+        // 0.6: always there: "Check for updates", or "Update to x.y.z" once one is known (askUpdate checks when none is).
+        updateButton = tvButton("Check for updates") { askUpdate() }
         updateLine = text("", 18f, 0xFF4FC3F7.toInt()).apply { setPadding(0, dp(12), 0, 0); visibility = View.GONE }
         idle.addView(updateLine)
         idle.addView(LinearLayout(this).apply {
@@ -1065,8 +1066,8 @@ class TvActivity : Activity() {
 
     private fun updateChanged() {
         val r = updates.available
-        updateButton.text = r?.let { "Update to ${it.name}" } ?: "Update"
-        updateButton.visibility = if (r != null && !updates.busy) View.VISIBLE else View.GONE
+        updateButton.text = r?.let { "Update to ${it.name}" } ?: "Check for updates"
+        updateButton.isEnabled = !updates.busy
         updateLine.text = updates.state.ifEmpty { r?.let { "Tab Cast TV ${it.name} is ready" } ?: "" }
         updateLine.visibility = if (updateLine.text.isEmpty()) View.GONE else View.VISIBLE
         // Progress and problems also show over a page or the player (an update started from the tablet).

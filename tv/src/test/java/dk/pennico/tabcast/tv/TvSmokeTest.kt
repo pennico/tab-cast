@@ -311,6 +311,16 @@ class TvSmokeTest {
         c.pause().stop().destroy()
     }
 
+    /** 0.6: the start screen always offers "Check for updates" (the owner's button), not only "Update to x.y.z". */
+    @Test fun startScreenChecksForUpdates() {
+        TvActivity.port = 0
+        WebRemote.PORT_SETTING = 0
+        val c = Robolectric.buildActivity(TvActivity::class.java).setup()
+        val texts = c.get().window.decorView.allTexts()
+        assertTrue("Check for updates on the start screen: $texts", "Check for updates" in texts)
+        c.pause().stop().destroy()
+    }
+
     /** Every visible text under this view (0.5.2: the TV's note). */
     private fun android.view.View.allTexts(): List<String> = when {
         visibility != android.view.View.VISIBLE -> emptyList()
