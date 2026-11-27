@@ -43,6 +43,8 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
     @Volatile private var written = 0L
     @Volatile var decoded = 0L; private set
     @Volatile var dropped = 0L; private set
+    /** 20 ms sound chunks skipped to keep the delay short ([SOUND_TARGET_US]). */
+    @Volatile var soundSkipped = 0L; private set
     @Volatile var decoderName: String? = null; private set
     private var videoThread: Thread? = null
     private var audioThread: Thread? = null
@@ -176,12 +178,21 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
                 .build()
         } catch (e: Exception) { log("mirror: no sound output ($e)"); return }
         t.setVolume(volume)
+        // Android 12+: start after ~40 ms of sound, not when the whole buffer is full.
+        if (android.os.Build.VERSION.SDK_INT >= 31) runCatching { t.setStartThresholdInFrames(maxOf(min / (2 * channels), rate / 25)) }
+        // Never below what this TV's sound hardware needs plus a little room.
+        val targetUs = maxOf(SOUND_TARGET_US, min.toLong() / (2 * channels) * 1_000_000L / rate + 20_000L)
         track = t
         t.play()
         val started = SystemClock.elapsedRealtime()
         try {
             while (running) {
                 val (pcm, _) = sound.pollFirst(100, TimeUnit.MILLISECONDS) ?: continue
+                // 0.6: keep the sound's backlog short. A burst after a network hiccup fills the track's buffer, and a
+                // sender whose clock runs a little fast keeps it full: everything (the picture waits for the sound)
+                // then stays ~0.1 s late for good. Over the target, skip a chunk (20 ms, rare) to catch up.
+                // Only once it plays: before that Android may wait for a full buffer.
+                if (t.playbackHeadPosition != 0 && soundDelayUs() > targetUs) { soundSkipped++; continue }
                 val n = t.write(pcm, 0, pcm.size)
                 if (n > 0) written += n
             }
@@ -194,6 +205,9 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
     }
 
     companion object {
+        /** The most sound waiting in the track (µs) before chunks are skipped: room for a few ms of network jitter. */
+        const val SOUND_TARGET_US = 50_000L
+
         fun mimeOf(codec: String): String = when (codec) {
             "h264" -> MediaFormat.MIMETYPE_VIDEO_AVC
             "hevc" -> MediaFormat.MIMETYPE_VIDEO_HEVC
@@ -213,7 +227,7 @@ class TvMirror(private val onNeedKey: () -> Unit, private val log: (String) -> U
     }
 
     fun stats(): Map<String, Any?> = mapOf("decoded" to decoded, "dropped" to dropped, "decoder" to decoderName,
-        "soundDelayMs" to soundDelayUs() / 1000)
+        "soundDelayMs" to soundDelayUs() / 1000, "soundSkipped" to soundSkipped)
 
     fun release() {
         running = false
