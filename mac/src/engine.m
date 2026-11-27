@@ -154,7 +154,7 @@ static void fitBox(double srcW, double srcH, int height, int *w, int *h) {
         _what = @"the screen";
     } else {
         CGDirectDisplayID vid = [self makeVirtualDisplay];
-        if (!vid) { *error = @"This Mac doesn't offer a second screen for the TV: cast a window or the screen instead"; return NO; }
+        if (!vid) { *error = @"The TV screen didn't come up on this Mac: cast a window or the screen instead"; return NO; }
         SCDisplay *vd = nil;
         for (int i = 0; i < 40 && !vd; i++) { // it takes a moment to appear
             [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
@@ -518,25 +518,79 @@ static NSArray<NSNumber *> *processObjects(pid_t pid, NSString *bundle) {
 
 // ---------------------------------------------------------------------------- virtual display
 
+/**
+ * Makes the TV screen a screen of its own, right of the Mac's (home). macOS may bring a big new screen up mirrored (it
+ * takes it for a TV) or keep a remembered one switched off (a display tool can leave that behind): NO when it is off.
+ */
+static BOOL placeBesideMac(CGDirectDisplayID vid, CGDirectDisplayID home) {
+    CGDirectDisplayID all[16];
+    uint32_t n = 0;
+    CGGetOnlineDisplayList(16, all, &n);
+    BOOL online = NO, mirrored = CGDisplayMirrorsDisplay(vid) != kCGNullDirectDisplay, homeOnline = NO;
+    for (uint32_t i = 0; i < n; i++) {
+        if (all[i] == vid) online = YES;
+        else if (CGDisplayMirrorsDisplay(all[i]) == vid) mirrored = YES;
+        if (all[i] == home) homeOnline = YES;
+    }
+    if (!online || (!CGDisplayIsActive(vid) && !mirrored)) return NO;
+    CGDisplayConfigRef c;
+    if (mirrored && CGBeginDisplayConfiguration(&c) == kCGErrorSuccess) {
+        for (uint32_t i = 0; i < n; i++)
+            if (all[i] != vid && CGDisplayMirrorsDisplay(all[i]) == vid) CGConfigureDisplayMirrorOfDisplay(c, all[i], kCGNullDirectDisplay);
+        if (CGDisplayMirrorsDisplay(vid)) CGConfigureDisplayMirrorOfDisplay(c, vid, kCGNullDirectDisplay);
+        if (homeOnline) CGConfigureDisplayOrigin(c, home, 0, 0); // the Mac's screen stays the main one
+        // Permanently: macOS remembers the TV screen as a screen of its own and doesn't mirror it next time.
+        if (CGCompleteDisplayConfiguration(c, kCGConfigurePermanently) != kCGErrorSuccess) return NO;
+    }
+    if (!homeOnline) return YES;
+    CGRect h = CGDisplayBounds(home), v = CGDisplayBounds(vid);
+    if (v.origin.x != CGRectGetMaxX(h) || v.origin.y != h.origin.y) {
+        if (CGBeginDisplayConfiguration(&c) == kCGErrorSuccess) {
+            CGConfigureDisplayOrigin(c, vid, (int32_t)CGRectGetMaxX(h), (int32_t)h.origin.y);
+            CGCompleteDisplayConfiguration(c, kCGConfigurePermanently);
+        }
+    }
+    return !CGDisplayMirrorsDisplay(vid) && CGDisplayIsActive(vid);
+}
+
 - (CGDirectDisplayID)makeVirtualDisplay {
     Class D = NSClassFromString(@"CGVirtualDisplayDescriptor"), V = NSClassFromString(@"CGVirtualDisplay"),
           S = NSClassFromString(@"CGVirtualDisplaySettings"), M = NSClassFromString(@"CGVirtualDisplayMode");
     if (!D || !V || !S || !M) return 0;
-    CGVirtualDisplayDescriptor *d = [[D alloc] init];
-    d.queue = dispatch_get_main_queue();
-    d.name = @"Tab Cast TV";
-    d.maxPixelsWide = 1920; d.maxPixelsHigh = 1080;
-    d.sizeInMillimeters = CGSizeMake(1210, 680); // a 55" TV: macOS then draws at a normal size
-    d.vendorID = 0x7463; d.productID = 0x0006; d.serialNum = 1;
-    d.terminationHandler = ^(id a, id b) { (void)a; (void)b; };
-    CGVirtualDisplay *v = [[V alloc] initWithDescriptor:d];
-    if (!v) return 0;
-    CGVirtualDisplaySettings *s = [[S alloc] init];
-    s.hiDPI = 0;
-    s.modes = @[ [[M alloc] initWithWidth:1920 height:1080 refreshRate:60] ];
-    if (![v applySettings:s]) return 0;
-    _virtual = v;
-    return v.displayID;
+    CGDirectDisplayID home = CGMainDisplayID();
+    // macOS remembers a screen by its serial number. When the remembered one stays off, the next serial is a new screen
+    // to macOS; the one that works is kept for next time.
+    NSInteger first = MAX(1, [NSUserDefaults.standardUserDefaults integerForKey:@"tvScreenSerial"]);
+    for (NSInteger k = 0; k < 4; k++) {
+        unsigned serial = (unsigned)((first - 1 + k) % 4 + 1);
+        CGVirtualDisplayDescriptor *d = [[D alloc] init];
+        d.queue = dispatch_get_main_queue();
+        d.name = @"Tab Cast TV";
+        d.maxPixelsWide = 1920; d.maxPixelsHigh = 1080;
+        d.sizeInMillimeters = CGSizeMake(1210, 680); // a 55" TV: macOS then draws at a normal size
+        d.vendorID = 0x7463; d.productID = 0x0006; d.serialNum = serial;
+        d.terminationHandler = ^(id a, id b) { (void)a; (void)b; };
+        CGVirtualDisplay *v = [[V alloc] initWithDescriptor:d];
+        if (!v) return 0;
+        CGVirtualDisplaySettings *s = [[S alloc] init];
+        s.hiDPI = 0;
+        s.modes = @[ [[M alloc] initWithWidth:1920 height:1080 refreshRate:60] ];
+        if (![v applySettings:s]) return 0;
+        BOOL placed = NO;
+        for (int i = 0; i < 15 && !placed; i++) { // it takes a moment to come up
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+            placed = placeBesideMac(v.displayID, home);
+        }
+        if (placed) {
+            [NSUserDefaults.standardUserDefaults setInteger:serial forKey:@"tvScreenSerial"];
+            _virtual = v;
+            return v.displayID;
+        }
+        NSLog(@"Tab Cast: the TV screen (serial %u) stayed off: trying another", serial);
+        v = nil;
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.3]];
+    }
+    return 0;
 }
 
 @end
