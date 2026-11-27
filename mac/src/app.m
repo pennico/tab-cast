@@ -8,6 +8,7 @@
 #import <AppKit/AppKit.h>
 #import "engine.h"
 #import "macos.h"
+#import "check.h"
 #include "link.h"
 
 static NSString *const kHost = @"tvHost", *const kTvName = @"tvName", *const kQuality = @"quality",
@@ -65,6 +66,7 @@ static NSString *const kHost = @"tvHost", *const kTvName = @"tvName", *const kQu
     if (!host) {
         [self add:m title:@"Add the TV…" action:@selector(chooseTv:)];
         [m addItem:NSMenuItem.separatorItem];
+        [self add:m title:@"Check This Mac for Casting…" action:@selector(checkMac:)];
         [self add:m title:@"Quit Tab Cast" action:@selector(quit:)];
         return;
     }
@@ -113,6 +115,8 @@ static NSString *const kHost = @"tvHost", *const kTvName = @"tvName", *const kQu
     [self add:tv.submenu title:@"Pair Again" action:@selector(forgetPairing:)];
     [self add:tv.submenu title:@"Save the TV's Log to Downloads" action:@selector(tvReport:)];
     [m addItem:NSMenuItem.separatorItem];
+    NSMenuItem *check = [self add:m title:@"Check This Mac for Casting…" action:@selector(checkMac:)];
+    check.enabled = !_engine.casting; // the test uses the video encoder
     [self add:m title:@"Quit Tab Cast" action:@selector(quit:)];
 }
 
@@ -287,7 +291,9 @@ static void onLinkMessage(int type, int flags, const uint8_t *p, uint32_t len, v
     NSString *host = [self ask:@"The TV's address" text:@"Open Tab Cast TV: its start screen shows the address to type here. "
                                                          @"This Mac must be on the same Wi-Fi as the TV." value:[d stringForKey:kHost]];
     if (!host.length) return;
-    host = [host componentsSeparatedByString:@":"].firstObject; // the web remote's port isn't the link's
+    for (NSString *scheme in @[ @"http://", @"https://" ]) // typed as the TV shows the web remote
+        if ([host.lowercaseString hasPrefix:scheme]) host = [host substringFromIndex:scheme.length];
+    host = [[host componentsSeparatedByString:@"/"].firstObject componentsSeparatedByString:@":"].firstObject; // the web remote's port isn't the link's
     if (_engine.casting) [self stopCast:nil];
     [self closeLink];
     [d setObject:host forKey:kHost];
@@ -315,6 +321,25 @@ static void onLinkMessage(int type, int flags, const uint8_t *p, uint32_t len, v
     [d writeToFile:path atomically:YES];
     [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:path] ]];
     if (!_engine.casting) [self closeLink];
+}
+
+/** "Check This Mac": the report goes to Downloads (to send it on); the alert says the main points. */
+- (void)checkMac:(id)s {
+    (void)s;
+    NSString *r = TCCheckThisMac();
+    NSDateFormatter *f = [NSDateFormatter new];
+    f.dateFormat = @"yyyy-MM-dd HH.mm.ss";
+    NSString *path = [NSString stringWithFormat:@"%@/Downloads/Tab Cast Mac check %@.txt", NSHomeDirectory(), [f stringFromDate:[NSDate date]]];
+    [r writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    NSMutableArray *main = [NSMutableArray array];
+    for (NSString *line in [r componentsSeparatedByString:@"\n"]) {
+        NSString *t = [line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+        if ([t hasPrefix:@"Model:"] || [t hasPrefix:@"Best quality:"] || [t hasPrefix:@"Mac silent while casting:"] || [t hasPrefix:@"Available:"])
+            [main addObject:[t hasPrefix:@"Available:"] ? [@"Second screen " stringByAppendingString:[t lowercaseString]] : t];
+    }
+    [self alert:@"This Mac's check is in Downloads"
+           text:[[main componentsJoinedByString:@"\n"] stringByAppendingString:@"\n\nSend the file in Downloads (\"Tab Cast Mac check …\") if someone asked for it."]];
+    [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:path] ]];
 }
 
 - (void)quit:(id)s { (void)s; [self stopCast:nil]; [NSApp terminate:nil]; }

@@ -9,8 +9,8 @@ CFLAGS  = -O2 -Wall -Wextra -fobjc-arc -arch arm64 -arch x86_64 -mmacosx-version
 LIBS    = -framework Foundation -framework AppKit -framework ScreenCaptureKit -framework VideoToolbox \
           -framework CoreMedia -framework CoreVideo -framework CoreGraphics -framework CoreAudio \
           -framework ApplicationServices -framework IOKit -framework Security
-SRCS    = src/app.m src/engine.m src/macos.m src/link.c src/sendq.c
-HDRS    = src/engine.h src/macos.h src/link.h src/sendq.h
+SRCS    = src/app.m src/engine.m src/macos.m src/check.m src/link.c src/sendq.c
+HDRS    = src/check.h src/engine.h src/macos.h src/link.h src/sendq.h
 APP     = build/Tab Cast.app
 
 # Signed with the local code-signing identity when the login keychain has one: macOS then ties the screen, sound,
@@ -42,7 +42,17 @@ test:
 install: build/app.stamp
 	tools/mac-install.sh "$(APP)"
 
+# For another Mac (also an Intel one: the app is universal): the app zipped with its signature, plus the steps to open
+# it the first time (it isn't notarized, so macOS asks once). build/dist/
+VERSION := $(shell /usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' Info.plist)
+dist: build/app.stamp
+	@rm -rf build/dist && mkdir -p build/dist
+	codesign --verify --strict "$(APP)"
+	ditto -c -k --sequesterRsrc --keepParent "$(APP)" "build/dist/Tab Cast for Mac $(VERSION).zip"
+	cp dist/INSTALL.txt "build/dist/Install Tab Cast for Mac.txt"
+	@echo "build/dist: $$(ls build/dist | tr '\n' ' ')"
+
 clean:
 	rm -rf build
 
-.PHONY: all test install clean
+.PHONY: all test install dist clean
